@@ -2,72 +2,72 @@ import pytest
 from multi_rate_limit.rate_limit import RateLimit, SecondRateLimit, MinuteRateLimit, HourRateLimit, DayRateLimit
 
 @pytest.mark.parametrize(
-    "period, limit",
+    "limit, period",
     [
-      (0.1, 2),
+      (2, 0.1),
       (3, 4)
     ]
 )
-def test_rate_limit(period: float, limit: int) -> None:
-  rl = RateLimit(period, limit)
+def test_rate_limit(limit: int, period: float) -> None:
+  rl = RateLimit(limit, period)
   assert rl.period_in_seconds == period
   assert rl.resource_limit == limit
 
 @pytest.mark.parametrize(
-    "period, limit",
+    "limit, period",
     [
       (0, 2),
       (3, -1)
     ]
 )
-def test_rate_limit_error(period: float, limit: int) -> None:
+def test_rate_limit_error(limit: int, period: float) -> None:
   with pytest.raises(ValueError) as e:
-    RateLimit(period, limit)
+    RateLimit(limit, period)
 
 @pytest.mark.parametrize(
-    "limit",
+    "limit, period",
     [
-      (1),
-      (4)
+      (1, 0.5),
+      (4, 3)
     ]
 )
-def test_second_rate_limit(limit: int) -> None:
-  rl = SecondRateLimit(limit)
-  assert rl.period_in_seconds == 1
+def test_second_rate_limit(limit: int, period: float) -> None:
+  rl = SecondRateLimit(limit, period)
+  assert rl.period_in_seconds == period
   assert rl.resource_limit == limit
 
 @pytest.mark.parametrize(
-    "limit",
+    "limit, period",
     [
-      (1),
-      (4)
+      (1, 0.5),
+      (4, 3)
     ]
 )
-def test_minute_rate_limit(limit: int) -> None:
-  rl = MinuteRateLimit(limit)
-  assert rl.period_in_seconds == 60
+def test_minute_rate_limit(limit: int, period: float) -> None:
+  rl = MinuteRateLimit(limit, period)
+  assert rl.period_in_seconds == 60 * period
   assert rl.resource_limit == limit
 
 @pytest.mark.parametrize(
-    "limit",
+    "limit, period",
     [
-      (1),
-      (4)
+      (1, 0.5),
+      (4, 3)
     ]
 )
-def test_hour_rate_limit(limit: int) -> None:
-  rl = HourRateLimit(limit)
-  assert rl.period_in_seconds == 3600
+def test_hour_rate_limit(limit: int, period: float) -> None:
+  rl = HourRateLimit(limit, period)
+  assert rl.period_in_seconds == 3600 * period
   assert rl.resource_limit == limit
 
 @pytest.mark.parametrize(
-    "limit",
+    "limit, period",
     [
-      (1),
-      (4)
+      (1, 0.5),
+      (4, 3)
     ]
 )
-def test_day_rate_limit(limit: int) -> None:
-  rl = DayRateLimit(limit)
-  assert rl.period_in_seconds == 86400
+def test_day_rate_limit(limit: int, period: float) -> None:
+  rl = DayRateLimit(limit, period)
+  assert rl.period_in_seconds == 86400 * period
   assert rl.resource_limit == limit
