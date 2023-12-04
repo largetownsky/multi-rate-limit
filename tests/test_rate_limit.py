@@ -8,7 +8,7 @@ from multi_rate_limit.rate_limit import RateLimit, SecondRateLimit, MinuteRateLi
       (3, 4)
     ]
 )
-def test_rate_limit(limit: int, period: float) -> None:
+def test_rate_limit(limit: int, period: float):
   rl = RateLimit(limit, period)
   assert rl.period_in_seconds == period
   assert rl.resource_limit == limit
@@ -20,7 +20,7 @@ def test_rate_limit(limit: int, period: float) -> None:
       (3, -1)
     ]
 )
-def test_rate_limit_error(limit: int, period: float) -> None:
+def test_rate_limit_error(limit: int, period: float):
   with pytest.raises(ValueError) as e:
     RateLimit(limit, period)
 
@@ -31,7 +31,7 @@ def test_rate_limit_error(limit: int, period: float) -> None:
       (4, 3)
     ]
 )
-def test_second_rate_limit(limit: int, period: float) -> None:
+def test_second_rate_limit(limit: int, period: float):
   rl = SecondRateLimit(limit, period)
   assert rl.period_in_seconds == period
   assert rl.resource_limit == limit
@@ -43,7 +43,7 @@ def test_second_rate_limit(limit: int, period: float) -> None:
       (4, 3)
     ]
 )
-def test_minute_rate_limit(limit: int, period: float) -> None:
+def test_minute_rate_limit(limit: int, period: float):
   rl = MinuteRateLimit(limit, period)
   assert rl.period_in_seconds == 60 * period
   assert rl.resource_limit == limit
@@ -55,7 +55,7 @@ def test_minute_rate_limit(limit: int, period: float) -> None:
       (4, 3)
     ]
 )
-def test_hour_rate_limit(limit: int, period: float) -> None:
+def test_hour_rate_limit(limit: int, period: float):
   rl = HourRateLimit(limit, period)
   assert rl.period_in_seconds == 3600 * period
   assert rl.resource_limit == limit
@@ -67,7 +67,7 @@ def test_hour_rate_limit(limit: int, period: float) -> None:
       (4, 3)
     ]
 )
-def test_day_rate_limit(limit: int, period: float) -> None:
+def test_day_rate_limit(limit: int, period: float):
   rl = DayRateLimit(limit, period)
   assert rl.period_in_seconds == 86400 * period
   assert rl.resource_limit == limit

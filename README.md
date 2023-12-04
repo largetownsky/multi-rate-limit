@@ -1,6 +1,4 @@
 # ToDo
-* Implements
-  * multi_rate_limit
 * Tests
-  * resource_queue
+  * multi_rate_limit
 * Docstrings

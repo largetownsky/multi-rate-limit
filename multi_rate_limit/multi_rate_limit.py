@@ -40,9 +40,9 @@ class MultiRateLimit:
       raise ValueError(f'Invalid None positive length or values : {[len(ls) for ls in limits]}, {max_async_run}')
     # Copy for overwrite safety
     self.__limits = [[*ls] for ls in limits]
-    self.__past_queue = PastResourceQueue(self.limits)
-    self.__current_buffer = CurrentResourceBuffer(self.limits, max_async_run)
-    self.__next_queue = NextResourceQueue(self.limits)
+    self.__past_queue = PastResourceQueue(len(limits), max([max([l.period_in_seconds for l in ls]) for ls in limits]))
+    self.__current_buffer = CurrentResourceBuffer(len(limits), max_async_run)
+    self.__next_queue = NextResourceQueue(len(limits))
     self.__loop = asyncio.get_running_loop()
     self.__in_process: Optional[Task] = None
   
@@ -107,9 +107,13 @@ class MultiRateLimit:
       self.__in_process.cancel()
     self.__in_process = asyncio.create_task(self.__process())
   
-  def __resource_margin_from_past(self, current_time: float) -> List[float]:
-    return [min([l.resource_limit - self.__past_queue.sum_resource_after(current_time, i) for l in ls])
+  def __resouce_sum_from_past(self, current_time: float) -> List[List[int]]:
+    return [[self.__past_queue.sum_resource_after(current_time - l.period_in_seconds, i) for l in ls]
         for i, ls in enumerate(self.__limits)]
+
+  def __resource_margin_from_past(self, current_time: float) -> List[int]:
+    return [min([l.resource_limit - r for l, r in zip(ls, rs)])
+        for ls, rs in zip(self.__limits, self.__resouce_sum_from_past(current_time))]
 
   def __time_to_start(self, sum_resourcs_without_past: List[int]) -> float:
     return max([max([l.period_in_seconds + self.__past_queue.time_accum_resouce_within(i, l.resource_limit - sr) for l in ls])
@@ -134,7 +138,8 @@ class MultiRateLimit:
     return ticket
 
   def cancel(self, number: int) -> bool:
-    /
+    return self.__next_queue.cancel(number) is not None
 
-  def stats(self):
-    /
+  def stats(self, current_time = time.time()) -> RateLimitStats:
+    return RateLimitStats([[*ls] for ls in self.__limits], self.__resouce_sum_from_past(current_time)
+        , [*self.__current_buffer.sum_resources], [*self.__next_queue.sum_resources])

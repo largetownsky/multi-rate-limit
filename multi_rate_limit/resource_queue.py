@@ -4,7 +4,7 @@ from asyncio import create_task, Future, Task
 from collections import deque
 from typing import Any, Coroutine, Dict, List, Optional, Tuple
 
-from multi_rate_limit.rate_limit import RateLimit, RateLimitError
+from multi_rate_limit.rate_limit import RateLimitError
 
 
 def check_resources(resources: List[float], len_res: int) -> List[float]:
@@ -15,10 +15,10 @@ def check_resources(resources: List[float], len_res: int) -> List[float]:
 
 
 class PastResourceQueue:
-  def __init__(self, limits: List[List[RateLimit]]):
+  def __init__(self, len_resource: int, longest_period_in_seconds: float):
     # Append the first element with time and accumulated resource usages.
-    self.time_resource_queue: deque[Tuple[float, List[int]]] = deque([(0, [0 for i in range(len(limits))])])
-    self.longest_period_in_seconds: float = max([max([l.period_in_seconds for l in ls]) for ls in limits])
+    self.time_resource_queue: deque[Tuple[float, List[int]]] = deque([(0, [0 for _ in range(len_resource)])])
+    self.longest_period_in_seconds: float = longest_period_in_seconds
   
   def pos_time_after(self, time: float) -> int:
     return bisect.bisect_right(self.time_resource_queue, time, key=lambda t: t[0])
@@ -33,7 +33,7 @@ class PastResourceQueue:
   
   def time_accum_resource_within(self, order: int, amount: int) -> float:
     pos = self.pos_accum_resouce_within(order, amount)
-    return self.time_resource_queue[max(0, pos - 1)][0]
+    return self.time_resource_queue[pos][0]
   
   def add(self, use_time: float, use_resources: List[int]):
     last_elem = self.time_resource_queue[-1]
@@ -55,7 +55,7 @@ class PastResourceQueue:
 
 
 class CurrentResourceBuffer:
-  def __init__(self, limits: List[List[RateLimit]], max_async_run: int):
+  def __init__(self, len_resource: int, max_async_run: int):
     # Candidate amount list to use resources
     self.resource_buffer: List[Optional[List[int]]] = [None for i in range(max_async_run)]
     self.task_buffer: List[Optional[Task[Tuple[Optional[Tuple[float, List[int]]], Any]]]] = [None for i in range(max_async_run)]
@@ -64,7 +64,7 @@ class CurrentResourceBuffer:
     # Next buffer position for fast search
     self.next: int = 0
     self.active_run: int = 0
-    self.sum_resources: List[int] = [0 for i in range(len(limits))]
+    self.sum_resources: List[int] = [0 for _ in range(len_resource)]
   
   def is_empty(self) -> bool:
     return self.active_run <= 0
@@ -73,9 +73,9 @@ class CurrentResourceBuffer:
     return self.active_run >= len(self.resource_buffer)
   
   def start_coroutine(self, use_resources: List[int]
-      , coro: Coroutine[Tuple[Optional[List[int]], Any]], future: Future[Any]):
+      , coro: Coroutine[Any, Any, Tuple[Optional[Tuple[float, List[int]]], Any]], future: Future[Any]) -> bool:
     if self.is_full():
-      return None
+      return False
     # Search an empty index
     pos = self.next
     while True:
@@ -92,6 +92,7 @@ class CurrentResourceBuffer:
     self.next = (pos + 1) % len(self.resource_buffer)
     self.active_run += 1
     self.sum_resources = [x + y for x, y in zip(self.sum_resources, use_resources)]
+    return True
   
   def end_coroutine(self, use_time: float
       , finished_task: Task[Tuple[Optional[Tuple[float, List[int]]], Any]]) -> Tuple[float, List[int]]:
@@ -115,31 +116,33 @@ class CurrentResourceBuffer:
       self.future_buffer[pos].set_exception(e)
     # Update parameters
     self.sum_resources = [x - y for x, y in zip(self.sum_resources, self.resource_buffer[pos])]
-    self.task_buffer = None
     self.resource_buffer[pos] = None
+    self.task_buffer[pos] = None
     self.future_buffer[pos] = None
     self.active_run -= 1
     return use_time, use_resources
 
 
 class NextResourceQueue:
-  def __init__(self, limits: List[List[RateLimit]]):
-    self.number_to_resource_coro_future: Dict[int, Tuple[List[int], Coroutine[Tuple[Optional[List[int]], Any]], Future[Any]]] = {}
+  def __init__(self, len_resource: int):
+    self.number_to_resource_coro_future: Dict[int, Tuple[List[int]
+        , Coroutine[Any, Any, Tuple[Optional[List[int]], Any]], Future[Any]]] = {}
     self.next_add: int = 0
     self.next_run: int = 0
-    self.sum_resources: List[int] = [0 for i in range(len(limits))]
+    self.sum_resources: List[int] = [0 for _ in range(len_resource)]
   
   def is_empty(self) -> bool:
     return len(self.number_to_resource_coro_future) <= 0
     
-  def push(self, use_resources: List[int], coro: Coroutine[Tuple[Optional[List[int]], Any]], future: Future[Any]) -> int:
+  def push(self, use_resources: List[int]
+      , coro: Coroutine[Any, Any, Tuple[Optional[List[int]], Any]], future: Future[Any]) -> int:
     pos = self.next_add
     self.number_to_resource_coro_future[pos] = use_resources, coro, future
     self.next_add += 1
     self.sum_resources = [x + y for x, y in zip(self.sum_resources, use_resources)]
     return pos
 
-  def pop(self) -> Optional[Tuple[List[int], Coroutine[Tuple[Optional[List[int]], Any]], Future[Any]]]:
+  def pop(self) -> Optional[Tuple[List[int], Coroutine[Any, Any, Tuple[Optional[List[int]], Any]], Future[Any]]]:
     while self.next_run < self.next_add:
       val = self.number_to_resource_coro_future.pop(self.next_run, None)
       self.next_run += 1
@@ -148,7 +151,7 @@ class NextResourceQueue:
         return val
     return None
 
-  def peek(self) -> Optional[Tuple[List[int], Coroutine[Tuple[Optional[List[int]], Any]], Future[Any]]]:
+  def peek(self) -> Optional[Tuple[List[int], Coroutine[Any, Any, Tuple[Optional[List[int]], Any]], Future[Any]]]:
     while self.next_run < self.next_add:
       val = self.number_to_resource_coro_future.get(self.next_run)
       if val is not None:
@@ -156,7 +159,7 @@ class NextResourceQueue:
       self.next_run += 1
     return None
   
-  def cancel(self, number: int) -> Optional[Tuple[List[int], Coroutine[Tuple[Optional[List[int]], Any]], Future[Any]]]:
+  def cancel(self, number: int) -> Optional[Tuple[List[int], Coroutine[Any, Any, Tuple[Optional[List[int]], Any]], Future[Any]]]:
     val = self.number_to_resource_coro_future.pop(number, None)
     if val is not None:
       self.sum_resources = [x - y for x, y in zip(self.sum_resources, val[0])]
