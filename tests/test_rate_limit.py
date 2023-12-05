@@ -21,7 +21,7 @@ def test_rate_limit(limit: int, period: float):
     ]
 )
 def test_rate_limit_error(limit: int, period: float):
-  with pytest.raises(ValueError) as e:
+  with pytest.raises(ValueError):
     RateLimit(limit, period)
 
 @pytest.mark.parametrize(
