@@ -46,7 +46,7 @@ class MultiRateLimit:
     self._loop = asyncio.get_running_loop()
     self._in_process: Optional[Task] = None
   
-  async def __process(self):
+  async def _process(self):
     ex: Optional[Exception] = None
     while True:
       try:
@@ -70,13 +70,13 @@ class MultiRateLimit:
               break
             # Check the total resource usage within their limits
             if resource_margin_from_past is None:
-              resource_margin_from_past = self.__resource_margin_from_past(current_time)
+              resource_margin_from_past = self._resource_margin_from_past(current_time)
             if all([rm >= sr for rm, sr in zip(resource_margin_from_past, sum_resources)]):
               self._next_queue.pop()
               self._current_buffer.start_coroutine(next_resources, coro, future)
               continue
             # Predict time to accept
-            time_to_start = self.__time_to_start(sum_resources)
+            time_to_start = self._time_to_start(sum_resources)
             delay = max(0, time_to_start - current_time)
             if delay <= 0:
               raise ValueError('Internal logic error')
@@ -104,24 +104,24 @@ class MultiRateLimit:
     if ex is not None:
       raise ex
 
-  def __try_process(self):
+  def _try_process(self):
     if self._in_process is not None:
       self._in_process.cancel()
-    self._in_process = asyncio.create_task(self.__process())
+    self._in_process = asyncio.create_task(self._process())
   
-  def __resouce_sum_from_past(self, current_time: float) -> List[List[int]]:
+  def _resouce_sum_from_past(self, current_time: float) -> List[List[int]]:
     return [[self._past_queue.sum_resource_after(current_time - l.period_in_seconds, i) for l in ls]
         for i, ls in enumerate(self._limits)]
 
-  def __resource_margin_from_past(self, current_time: float) -> List[int]:
+  def _resource_margin_from_past(self, current_time: float) -> List[int]:
     return [min([l.resource_limit - r for l, r in zip(ls, rs)])
-        for ls, rs in zip(self._limits, self.__resouce_sum_from_past(current_time))]
+        for ls, rs in zip(self._limits, self._resouce_sum_from_past(current_time))]
 
-  def __time_to_start(self, sum_resourcs_without_past: List[int]) -> float:
+  def _time_to_start(self, sum_resourcs_without_past: List[int]) -> float:
     return max([max([l.period_in_seconds + self._past_queue.time_accum_resource_within(i, l.resource_limit - sr) for l in ls])
         for i, (ls, sr) in enumerate(zip(self._limits, sum_resourcs_without_past))])
   
-  def __add_next(self, use_resources: List[int], coro: Coroutine[Any, Any, Tuple[Optional[Tuple[float, List[int]]], Any]]
+  def _add_next(self, use_resources: List[int], coro: Coroutine[Any, Any, Tuple[Optional[Tuple[float, List[int]]], Any]]
       , future: Future[Any]) -> ReservationTicket:
     reserve_number = self._next_queue.push(use_resources, coro, future)
     return ReservationTicket(reserve_number, future)
@@ -132,27 +132,29 @@ class MultiRateLimit:
     if any([any([l.resource_limit < r for l in ls]) for ls, r in zip(self._limits, use_resources)]):
       raise ValueError(f'Using resources exceed the capacity : {use_resources}')
     is_next_empty = self._next_queue.is_empty()
-    ticket = self.__add_next(use_resources, coro, self._loop.create_future())
+    ticket = self._add_next(use_resources, coro, self._loop.create_future())
     # The current buffer is the bottleneck, so adding it to the queue does not change what is monitored
     if not is_next_empty or self._current_buffer.is_full():
       return ticket
     rest_resources = [min([l.resource_limit for l in ls]) - cr - ur
         for ls, cr, ur in zip(self._limits, self._current_buffer.sum_resources, use_resources)]
     if 0 <= min(rest_resources):
-      self.__try_process()
+      self._try_process()
     return ticket
 
   def cancel(self, number: int) -> Optional[Tuple[List[int], Coroutine[Any, Any, Tuple[Optional[Tuple[float, List[int]]], Any]]]]:
     res = self._next_queue.cancel(number)
     if res is None:
       return None
-    use_resources, coro, future = res
+    use_resources, coro, future, is_next_pop = res
     # Cancel it so you don't have to wait forever due to client's logic mistakes
     future.cancel()
+    if is_next_pop and not self._current_buffer.is_full():
+      self._try_process()
     return use_resources, coro
 
   def stats(self, current_time = None) -> RateLimitStats:
     if current_time is None:
       current_time = time.time()
-    return RateLimitStats([[*ls] for ls in self._limits], self.__resouce_sum_from_past(current_time)
+    return RateLimitStats([[*ls] for ls in self._limits], self._resouce_sum_from_past(current_time)
         , [*self._current_buffer.sum_resources], [*self._next_queue.sum_resources])

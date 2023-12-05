@@ -315,7 +315,7 @@ async def test_next():
   assert queue.next_add == 1
   assert queue.next_run == 0
   assert queue.sum_resources == [1, 2]
-  assert queue.cancel(0) == ([1, 2], dummy, f)
+  assert queue.cancel(0) == ([1, 2], dummy, f, True)
   assert queue.is_empty() == True
   assert len(queue.number_to_resource_coro_future) == 0
   assert queue.next_add == 1
@@ -347,12 +347,12 @@ async def test_next():
   assert queue.pop() is None
   assert queue.push([1, 2], dummy, f) == 2
   assert queue.push([2, 3], dummy, f) == 3
-  assert queue.cancel(3) == ([2, 3], dummy, f)
+  assert queue.cancel(3) == ([2, 3], dummy, f, False)
   assert queue.push([3, 4], dummy, f) == 4
   assert queue.pop() == ([1, 2], dummy, f)
   assert queue.push([4, 5], dummy, f) == 5
   assert queue.peek() == ([3, 4], dummy, f)
-  assert queue.cancel(4) == ([3, 4], dummy, f)
+  assert queue.cancel(4) == ([3, 4], dummy, f, True)
   assert queue.is_empty() == False
   assert len(queue.number_to_resource_coro_future) == 1
   assert queue.next_add == 6

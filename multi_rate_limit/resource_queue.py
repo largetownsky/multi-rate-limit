@@ -159,8 +159,10 @@ class NextResourceQueue:
       self.next_run += 1
     return None
   
-  def cancel(self, number: int) -> Optional[Tuple[List[int], Coroutine[Any, Any, Tuple[Optional[List[int]], Any]], Future[Any]]]:
+  def cancel(self, number: int) -> Optional[Tuple[List[int], Coroutine[Any, Any, Tuple[Optional[List[int]], Any]], Future[Any], bool]]:
     val = self.number_to_resource_coro_future.pop(number, None)
-    if val is not None:
-      self.sum_resources = [x - y for x, y in zip(self.sum_resources, val[0])]
-    return val
+    if val is None:
+      return None
+    self.sum_resources = [x - y for x, y in zip(self.sum_resources, val[0])]
+    is_next_pop = len(self.number_to_resource_coro_future) == 0 or number < min([n for n in self.number_to_resource_coro_future.keys()])
+    return (*val, is_next_pop)
