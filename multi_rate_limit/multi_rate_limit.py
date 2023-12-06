@@ -3,10 +3,10 @@ import time
 
 from asyncio import Future, Task
 from dataclasses import dataclass
-from typing import Any, Coroutine, List, Optional, Tuple
+from typing import Any, Callable, Coroutine, List, Optional, Tuple
 
-from multi_rate_limit.rate_limit import RateLimit
-from multi_rate_limit.resource_queue import PastResourceQueue, CurrentResourceBuffer, NextResourceQueue, check_resources
+from multi_rate_limit.rate_limit import FilePastResourceQueue, IPastResourceQueue, RateLimit
+from multi_rate_limit.resource_queue import CurrentResourceBuffer, NextResourceQueue, check_resources
 
 
 @dataclass
@@ -35,18 +35,22 @@ class RateLimitStats:
 
 
 class MultiRateLimit:
-  def __init__(self, limits: List[List[RateLimit]], max_async_run = 1):
+  def __init__(self, limits: List[List[RateLimit]]
+      , past_queue_factory: Callable[[int, float], IPastResourceQueue] = None, max_async_run = 1):
     if len(limits) <= 0 or min([len(ls) for ls in limits]) <= 0 or max_async_run <= 0:
       raise ValueError(f'Invalid None positive length or values : {[len(ls) for ls in limits]}, {max_async_run}')
+    if past_queue_factory is None:
+      past_queue_factory = lambda len_resource, longest_period_in_seconds: FilePastResourceQueue(len_resource, longest_period_in_seconds)
     # Copy for overwrite safety
     self._limits = [[*ls] for ls in limits]
-    self._past_queue = PastResourceQueue(len(limits), max([max([l.period_in_seconds for l in ls]) for ls in limits]))
+    self._past_queue = past_queue_factory(len(limits), max([max([l.period_in_seconds for l in ls]) for ls in limits]))
     self._current_buffer = CurrentResourceBuffer(len(limits), max_async_run)
     self._next_queue = NextResourceQueue(len(limits))
     self._loop = asyncio.get_running_loop()
     self._in_process: Optional[Task] = None
+    self._teminated: bool = False
   
-  async def _process(self):
+  async def _process(self) -> None:
     ex: Optional[Exception] = None
     while True:
       try:
@@ -104,7 +108,7 @@ class MultiRateLimit:
     if ex is not None:
       raise ex
 
-  def _try_process(self):
+  def _try_process(self) -> None:
     if self._in_process is not None:
       self._in_process.cancel()
     self._in_process = asyncio.create_task(self._process())
@@ -128,9 +132,13 @@ class MultiRateLimit:
 
   def reserve(self, use_resources: List[int]
       , coro: Coroutine[Any, Any, Tuple[Optional[Tuple[float, List[int]]], Any]]) -> ReservationTicket:
+    if self._teminated:
+      raise Exception('Already terminated')
     use_resources = check_resources(use_resources, len(self._limits))
     if any([any([l.resource_limit < r for l in ls]) for ls, r in zip(self._limits, use_resources)]):
       raise ValueError(f'Using resources exceed the capacity : {use_resources}')
+    if not asyncio.iscoroutine(coro):
+      raise ValueError('Parameter is not a coroutine')
     is_next_empty = self._next_queue.is_empty()
     ticket = self._add_next(use_resources, coro, self._loop.create_future())
     # The current buffer is the bottleneck, so adding it to the queue does not change what is monitored
@@ -143,6 +151,8 @@ class MultiRateLimit:
     return ticket
 
   def cancel(self, number: int) -> Optional[Tuple[List[int], Coroutine[Any, Any, Tuple[Optional[Tuple[float, List[int]]], Any]]]]:
+    if self._teminated:
+      raise Exception('Already terminated')
     res = self._next_queue.cancel(number)
     if res is None:
       return None
@@ -154,7 +164,22 @@ class MultiRateLimit:
     return use_resources, coro
 
   def stats(self, current_time = None) -> RateLimitStats:
+    if self._teminated:
+      raise Exception('Already terminated')
     if current_time is None:
       current_time = time.time()
     return RateLimitStats([[*ls] for ls in self._limits], self._resouce_sum_from_past(current_time)
         , [*self._current_buffer.sum_resources], [*self._next_queue.sum_resources])
+  
+  async def term(self) -> None:
+    if self._teminated:
+      raise Exception('Already terminated')
+    self._teminated = True
+    # Dispose all next coroutines
+    while True:
+      res = self._next_queue.pop()
+      if res is None:
+        break
+      res[2].cancel()
+    # The internal process continues to run until all current tasks are completed
+    await self._past_queue.term()

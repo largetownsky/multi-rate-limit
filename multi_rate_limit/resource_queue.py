@@ -1,10 +1,7 @@
-import bisect
-
 from asyncio import create_task, Future, Task
-from collections import deque
 from typing import Any, Coroutine, Dict, List, Optional, Tuple
 
-from multi_rate_limit.rate_limit import RateLimitError
+from multi_rate_limit.rate_limit import ResourceOverwriteError
 
 
 def check_resources(resources: List[float], len_res: int) -> List[float]:
@@ -12,46 +9,6 @@ def check_resources(resources: List[float], len_res: int) -> List[float]:
     raise ValueError(f'Invalid resources with invalid length or negative values : {resources} : {len_res}')
   # Copy for overwrite safety
   return [*resources]
-
-
-class PastResourceQueue:
-  def __init__(self, len_resource: int, longest_period_in_seconds: float):
-    # Append the first element with time and accumulated resource usages.
-    self.time_resource_queue: deque[Tuple[float, List[int]]] = deque([(0, [0 for _ in range(len_resource)])])
-    self.longest_period_in_seconds: float = longest_period_in_seconds
-  
-  def pos_time_after(self, time: float) -> int:
-    return bisect.bisect_right(self.time_resource_queue, time, key=lambda t: t[0])
-  
-  def sum_resource_after(self, time: float, order: int) -> int:
-    pos = self.pos_time_after(time)
-    return self.time_resource_queue[-1][1][order] - self.time_resource_queue[max(0, pos - 1)][1][order]
-
-  def pos_accum_resouce_within(self, order: int, amount: int) -> int:
-    last_amount = self.time_resource_queue[-1][1][order]
-    return bisect.bisect_left(self.time_resource_queue, last_amount - amount, key=lambda t: t[1][order])
-  
-  def time_accum_resource_within(self, order: int, amount: int) -> float:
-    pos = self.pos_accum_resouce_within(order, amount)
-    return self.time_resource_queue[pos][0]
-  
-  def add(self, use_time: float, use_resources: List[int]):
-    last_elem = self.time_resource_queue[-1]
-    if use_time <= last_elem[0]:
-      # Never add before last registered time
-      use_time = last_elem[0]
-      # For search uniqueness, information from the same time is merged.
-      use_resources = [x + y for x, y in zip(last_elem[1], use_resources)]
-      # Replace the last
-      self.time_resource_queue[-1] = use_time, use_resources
-      return
-    # Append the last
-    self.time_resource_queue.append((use_time, [x + y for x, y in zip(last_elem[1], use_resources)]))
-    # Delete old unnecessary information
-    pos = self.pos_time_after(use_time - self.longest_period_in_seconds)
-    # To obtain the difference, the previous information is required.
-    for i in range(max(0, pos - 1)):
-      self.time_resource_queue.popleft()
 
 
 class CurrentResourceBuffer:
@@ -105,7 +62,7 @@ class CurrentResourceBuffer:
         use_resources = check_resources(overwrite_time_resources[1], len(self.sum_resources))
         use_time = overwrite_time_resources[0]
       self.future_buffer[pos].set_result(result)
-    except RateLimitError as e:
+    except ResourceOverwriteError as e:
       try:
         use_resources = check_resources(e.use_resources, len(self.sum_resources))
         use_time = e.use_time

@@ -4,7 +4,7 @@ import time
 
 from typing import Any, Coroutine, List
 
-from multi_rate_limit.rate_limit import RateLimit, RateLimitError
+from multi_rate_limit.rate_limit import RateLimit, ResourceOverwriteError
 from multi_rate_limit.multi_rate_limit import MultiRateLimit, RateLimitStats
 
 
@@ -18,7 +18,7 @@ from multi_rate_limit.multi_rate_limit import MultiRateLimit, RateLimitStats
 )
 def test_multi_rate_limit_init_error(limits: List[List[RateLimit]], max_async_run: int):
   with pytest.raises(ValueError):
-    MultiRateLimit(limits, max_async_run)
+    MultiRateLimit(limits, None, max_async_run)
 
 
 async def wait_and_return(wait_in_seconds: float, result: Any):
@@ -53,7 +53,11 @@ async def test_multi_rate_limit():
   # (3.3, [1, 20])
   # (4.5, [0, 25])
   limits = [[RateLimit(10, 1.5), RateLimit(15, 3)], [RateLimit(100, 3)]]
-  mrl = MultiRateLimit(limits, 2)
+  mrl = MultiRateLimit(limits, None, 2)
+  with pytest.raises(ValueError):
+    mrl.reserve([1, 2], None)
+  with pytest.raises(ValueError):
+    mrl.reserve([1, 2], 0)
   assert mrl.cancel(0) is None
   check_stats(mrl.stats(), limits, [[0, 0], [0]], [0, 0], [0, 0])
   coro1 = wait_and_return(0.6, (None, 'r1'))
@@ -61,7 +65,7 @@ async def test_multi_rate_limit():
   assert t1.reserve_number == 0
   assert t1.future.done() == False
   check_stats(mrl.stats(), limits, [[0, 0], [0]], [0, 0], [1, 2])
-  coro2 = wait_and_error(0.3, RateLimitError(time.time() + 0.3, [3, 3], ValueError()))
+  coro2 = wait_and_error(0.3, ResourceOverwriteError(time.time() + 0.3, [3, 3], ValueError()))
   t2 = mrl.reserve([2, 3], coro2)
   assert t2.reserve_number == 1
   assert t2.future.done() == False
