@@ -1,4 +1,7 @@
 # ToDo
-* FilePastResourceQueue implementation
+* FilePastResourceQueue
+  * async loop support
+  * async factory support
+  * test with file
 * Docstrings
 * ReadMe

@@ -59,39 +59,39 @@ async def test_multi_rate_limit():
   with pytest.raises(ValueError):
     mrl.reserve([1, 2], 0)
   assert mrl.cancel(0) is None
-  check_stats(mrl.stats(), limits, [[0, 0], [0]], [0, 0], [0, 0])
+  check_stats(await mrl.stats(), limits, [[0, 0], [0]], [0, 0], [0, 0])
   coro1 = wait_and_return(0.6, (None, 'r1'))
   t1 = mrl.reserve([1, 2], coro1)
   assert t1.reserve_number == 0
   assert t1.future.done() == False
-  check_stats(mrl.stats(), limits, [[0, 0], [0]], [0, 0], [1, 2])
+  check_stats(await mrl.stats(), limits, [[0, 0], [0]], [0, 0], [1, 2])
   coro2 = wait_and_error(0.3, ResourceOverwriteError(time.time() + 0.3, [3, 3], ValueError()))
   t2 = mrl.reserve([2, 3], coro2)
   assert t2.reserve_number == 1
   assert t2.future.done() == False
-  check_stats(mrl.stats(), limits, [[0, 0], [0]], [0, 0], [3, 5])
+  check_stats(await mrl.stats(), limits, [[0, 0], [0]], [0, 0], [3, 5])
   coro3 = wait_and_return(0.9, ((time.time() + 1.2, [2, 1]), 'r3'))
   t3 = mrl.reserve([3, 4], coro3)
   assert t3.reserve_number == 2
   assert t3.future.done() == False
-  check_stats(mrl.stats(), limits, [[0, 0], [0]], [0, 0], [6, 9])
+  check_stats(await mrl.stats(), limits, [[0, 0], [0]], [0, 0], [6, 9])
   # Switch to the process in the MultiRateLimit
   await asyncio.sleep(0)
-  check_stats(mrl.stats(), limits, [[0, 0], [0]], [3, 5], [3, 4])
+  check_stats(await mrl.stats(), limits, [[0, 0], [0]], [3, 5], [3, 4])
   await asyncio.wait([t1.future, t2.future, t3.future], return_when=asyncio.FIRST_COMPLETED)
   assert t1.future.done() == False
   assert t2.future.done() == True
   with pytest.raises(ValueError):
     await t2.future
   assert t3.future.done() == False
-  check_stats(mrl.stats(), limits, [[3, 3], [3]], [4, 6], [0, 0])
+  check_stats(await mrl.stats(), limits, [[3, 3], [3]], [4, 6], [0, 0])
   await asyncio.wait([t1.future, t3.future], return_when=asyncio.FIRST_COMPLETED)
   assert t1.future.done() == True
   assert await t1.future == 'r1'
   assert t3.future.done() == False
-  check_stats(mrl.stats(), limits, [[4, 4], [5]], [3, 4], [0, 0])
+  check_stats(await mrl.stats(), limits, [[4, 4], [5]], [3, 4], [0, 0])
   assert await t3.future == 'r3'
-  check_stats(mrl.stats(), limits, [[6, 6], [6]], [0, 0], [0, 0])
+  check_stats(await mrl.stats(), limits, [[6, 6], [6]], [0, 0], [0, 0])
   assert mrl._in_process is None
   # Add routines again
   coro1 = wait_and_return(0.3, (None, 'r1'))
@@ -108,19 +108,19 @@ async def test_multi_rate_limit():
   assert t3.future.done() == False
   # Switch to the process in the MultiRateLimit
   await asyncio.sleep(0)
-  check_stats(mrl.stats(), limits, [[6, 6], [6]], [4, 20], [6, 52]) # Get caught up in the limits[0][0]
+  check_stats(await mrl.stats(), limits, [[6, 6], [6]], [4, 20], [6, 52]) # Get caught up in the limits[0][0]
   assert mrl._in_process is not None
   assert mrl.cancel(3) == None
   assert mrl.cancel(4) == ([1, 2], coro2)
   await cosume_coroutine_to_avoid_warnings(coro2)
   assert t2.future.done() == True
   assert t2.future.cancelled() == True
-  check_stats(mrl.stats(), limits, [[6, 6], [6]], [4, 20], [5, 50])
+  check_stats(await mrl.stats(), limits, [[6, 6], [6]], [4, 20], [5, 50])
   await asyncio.wait([t1.future, t3.future], return_when=asyncio.FIRST_COMPLETED)
   assert t1.future.done() == True
   assert await t1.future == 'r1'
   assert t3.future.done() == False
-  check_stats(mrl.stats(), limits, [[10, 10], [26]], [0, 0], [5, 50]) # Get caught up in the limits[0][0]
+  check_stats(await mrl.stats(), limits, [[10, 10], [26]], [0, 0], [5, 50]) # Get caught up in the limits[0][0]
   coro1 = wait_and_return(0, (None, 'r1'))
   t1 = mrl.reserve([1, 20], coro1)
   assert t1.reserve_number == 6
@@ -134,11 +134,11 @@ async def test_multi_rate_limit():
   assert t2.future.done() == False
   assert t3.future.done() == True
   assert await t3.future == 'r3'
-  check_stats(mrl.stats(), limits, [[9, 15], [76]], [0, 0], [1, 45]) # Get caught up in the limits[0][1]
+  check_stats(await mrl.stats(), limits, [[9, 15], [76]], [0, 0], [1, 45]) # Get caught up in the limits[0][1]
   await asyncio.wait([t1.future, t2.future], return_when=asyncio.FIRST_COMPLETED)
   assert t1.future.done() == True
   assert await t1.future == 'r1'
   assert t2.future.done() == False
-  check_stats(mrl.stats(), limits, [[6, 13], [93]], [0, 0], [0, 25]) # Get caught up in the limits[1][0]
+  check_stats(await mrl.stats(), limits, [[6, 13], [93]], [0, 0], [0, 25]) # Get caught up in the limits[1][0]
   assert await t2.future == 'r2'
-  check_stats(mrl.stats(), limits, [[1, 6], [95]], [0, 0], [0, 0])
+  check_stats(await mrl.stats(), limits, [[1, 6], [95]], [0, 0], [0, 0])

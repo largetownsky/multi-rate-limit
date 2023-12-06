@@ -1,8 +1,10 @@
 """Classes for users of multi_rate_limit.
 """
 import abc
+import aiofiles
 import bisect
 
+from aiofiles.threadpool.text import AsyncTextIOWrapper
 from collections import deque
 from typing import List, Optional, Tuple
 
@@ -139,7 +141,7 @@ class IPastResourceQueue(metaclass=abc.ABCMeta):
   """An interface to customize how used resources are managed.
   """
   @abc.abstractmethod
-  def sum_resource_after(self, time: float, order: int) -> int:
+  async def sum_resource_after(self, time: float, order: int) -> int:
     """Returns the amount of resources of specified order used after the specified time.
 
     If the specified time is before the last resource use beyond the period passed at the constructor,
@@ -156,7 +158,7 @@ class IPastResourceQueue(metaclass=abc.ABCMeta):
     raise NotImplementedError()
   
   @abc.abstractmethod
-  def time_accum_resource_within(self, order: int, amount: int) -> float:
+  async def time_accum_resource_within(self, order: int, amount: int) -> float:
     """Returns the last timing when resource usage falls within the specified amount.
 
     Returns the latest timing at which the cumulative amount of resource usage
@@ -172,7 +174,7 @@ class IPastResourceQueue(metaclass=abc.ABCMeta):
     raise NotImplementedError()
   
   @abc.abstractmethod
-  def add(self, use_time: float, use_resources: List[int]) -> None:
+  async def add(self, use_time: float, use_resources: List[int]) -> None:
     """Add resource usage information.
 
     Args:
@@ -202,17 +204,49 @@ class FilePastResourceQueue(IPastResourceQueue):
       longest_period_in_seconds (float): Information before this is forgotten.
 
 
-      
+
   """
-  def __init__(self, len_resource: int, longest_period_in_seconds: float, save_file_path: Optional[str] = None):
+  def __init__(self, len_resource: int, longest_period_in_seconds: float, file_path: Optional[str] = None):
     # Append the first element with time and accumulated resource usages.
     self.time_resource_queue: deque[Tuple[float, List[int]]] = deque([(0, [0 for _ in range(len_resource)])])
     self.longest_period_in_seconds: float = longest_period_in_seconds
   
+  def _parse_line(self, line: str) -> Tuple[float, List[int]]:
+    line_core = line.strip()
+    if len(line_core) == len(line):
+      raise ValueError(f'Sudden file end : {line_core}')
+    tokens = line_core.split('\t')
+    if len(tokens) != 1 + len(self.time_resource_queue[0][1]):
+      raise ValueError(f'Resource length mismatch : {line_core}')
+    try:
+      use_time = float(tokens[0])
+      use_resources = [int(t) for t in tokens[1:]]
+      return use_time, use_resources
+    except:
+      raise ValueError(f'Number format error : {line_core}')
+
+  async def _write_line(self, f: AsyncTextIOWrapper, use_time: float, use_resources: List[int]) -> None:
+    line = '\t'.join([str(v) for v in [use_time, *use_resources]])
+    await f.write(f'{line}\n')
+
+  async def _read_file(self, file_path: str) -> None:
+    async with aiofiles.open(file_path) as f:
+      async for line in f:
+        self.add(*self._parse_line(line))
+  
+  async def _write_file(self, file_path: str) -> None:
+    async with aiofiles.open(file_path, mode = 'w') as f:
+      for use_time, use_resources in self.time_resource_queue:
+        await self._write_line(f, use_time, use_resources)
+
+  async def _append_file(self, file_path: str, use_time: float, use_resources: List[int]) -> None:
+    async with aiofiles.open(file_path, mode = 'a') as f:
+      await self._write_line(f, use_time, use_resources)
+  
   def pos_time_after(self, time: float) -> int:
     return bisect.bisect_right(self.time_resource_queue, time, key=lambda t: t[0])
   
-  def sum_resource_after(self, time: float, order: int) -> int:
+  async def sum_resource_after(self, time: float, order: int) -> int:
     pos = self.pos_time_after(time)
     return self.time_resource_queue[-1][1][order] - self.time_resource_queue[max(0, pos - 1)][1][order]
 
@@ -220,11 +254,11 @@ class FilePastResourceQueue(IPastResourceQueue):
     last_amount = self.time_resource_queue[-1][1][order]
     return bisect.bisect_left(self.time_resource_queue, last_amount - amount, key=lambda t: t[1][order])
   
-  def time_accum_resource_within(self, order: int, amount: int) -> float:
+  async def time_accum_resource_within(self, order: int, amount: int) -> float:
     pos = self.pos_accum_resouce_within(order, amount)
     return self.time_resource_queue[pos][0]
   
-  def add(self, use_time: float, use_resources: List[int]) -> None:
+  async def add(self, use_time: float, use_resources: List[int]) -> None:
     last_elem = self.time_resource_queue[-1]
     if use_time <= last_elem[0]:
       # Never add before last registered time

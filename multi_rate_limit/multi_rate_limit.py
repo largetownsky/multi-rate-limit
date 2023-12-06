@@ -74,13 +74,13 @@ class MultiRateLimit:
               break
             # Check the total resource usage within their limits
             if resource_margin_from_past is None:
-              resource_margin_from_past = self._resource_margin_from_past(current_time)
+              resource_margin_from_past = await self._resource_margin_from_past(current_time)
             if all([rm >= sr for rm, sr in zip(resource_margin_from_past, sum_resources)]):
               self._next_queue.pop()
               self._current_buffer.start_coroutine(next_resources, coro, future)
               continue
             # Predict time to accept
-            time_to_start = self._time_to_start(sum_resources)
+            time_to_start = await self._time_to_start(sum_resources)
             delay = max(0, time_to_start - current_time)
             if delay <= 0:
               raise ValueError('Internal logic error')
@@ -99,7 +99,7 @@ class MultiRateLimit:
             # Since the resource usage may change, the interpretation of next queue is passed to the next loop
             continue
           use_time, use_resources = self._current_buffer.end_coroutine(current_time, done)
-          self._past_queue.add(use_time, use_resources)        
+          await self._past_queue.add(use_time, use_resources)        
       except asyncio.exceptions.CancelledError:
         break
       except Exception as ex:
@@ -113,16 +113,16 @@ class MultiRateLimit:
       self._in_process.cancel()
     self._in_process = asyncio.create_task(self._process())
   
-  def _resouce_sum_from_past(self, current_time: float) -> List[List[int]]:
-    return [[self._past_queue.sum_resource_after(current_time - l.period_in_seconds, i) for l in ls]
+  async def _resouce_sum_from_past(self, current_time: float) -> List[List[int]]:
+    return [[await self._past_queue.sum_resource_after(current_time - l.period_in_seconds, i) for l in ls]
         for i, ls in enumerate(self._limits)]
 
-  def _resource_margin_from_past(self, current_time: float) -> List[int]:
+  async def _resource_margin_from_past(self, current_time: float) -> List[int]:
     return [min([l.resource_limit - r for l, r in zip(ls, rs)])
-        for ls, rs in zip(self._limits, self._resouce_sum_from_past(current_time))]
+        for ls, rs in zip(self._limits, await self._resouce_sum_from_past(current_time))]
 
-  def _time_to_start(self, sum_resourcs_without_past: List[int]) -> float:
-    return max([max([l.period_in_seconds + self._past_queue.time_accum_resource_within(i, l.resource_limit - sr) for l in ls])
+  async def _time_to_start(self, sum_resourcs_without_past: List[int]) -> float:
+    return max([max([l.period_in_seconds + await self._past_queue.time_accum_resource_within(i, l.resource_limit - sr) for l in ls])
         for i, (ls, sr) in enumerate(zip(self._limits, sum_resourcs_without_past))])
   
   def _add_next(self, use_resources: List[int], coro: Coroutine[Any, Any, Tuple[Optional[Tuple[float, List[int]]], Any]]
@@ -163,12 +163,12 @@ class MultiRateLimit:
       self._try_process()
     return use_resources, coro
 
-  def stats(self, current_time = None) -> RateLimitStats:
+  async def stats(self, current_time = None) -> RateLimitStats:
     if self._teminated:
       raise Exception('Already terminated')
     if current_time is None:
       current_time = time.time()
-    return RateLimitStats([[*ls] for ls in self._limits], self._resouce_sum_from_past(current_time)
+    return RateLimitStats([[*ls] for ls in self._limits], await self._resouce_sum_from_past(current_time)
         , [*self._current_buffer.sum_resources], [*self._next_queue.sum_resources])
   
   async def term(self) -> None:
