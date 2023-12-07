@@ -54,6 +54,10 @@ class MultiRateLimit:
     ex: Optional[Exception] = None
     while True:
       try:
+        # The only time next is swapped during await is if it is canceled,
+        # in which case it will start over from the beginning,
+        # so unless "changing a state that cannot maintain consistency",
+        # do not worry about the discrepancy between before and after await.
         delay = 0
         # Stuff into the current buffer
         if self._next_queue.is_empty():
@@ -99,7 +103,9 @@ class MultiRateLimit:
             # Since the resource usage may change, the interpretation of next queue is passed to the next loop
             continue
           use_time, use_resources = self._current_buffer.end_coroutine(current_time, done)
-          await self._past_queue.add(use_time, use_resources)        
+          # The only time when there is a possibility that consistency will not be maintained if it is canceled.
+          # By shielding, the await itself is canceled, but the internal add task continues to be executed.
+          await asyncio.shield(self._past_queue.add(use_time, use_resources))
       except asyncio.exceptions.CancelledError:
         break
       except Exception as ex:

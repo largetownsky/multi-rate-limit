@@ -177,6 +177,11 @@ class IPastResourceQueue(metaclass=abc.ABCMeta):
   async def add(self, use_time: float, use_resources: List[int]) -> None:
     """Add resource usage information.
 
+    Cancel from MultiRateLimit is protected by shield,
+    so it can be executed until the end unless you cancel it yourself.
+    On the other hand, there is a possibility that another function will be called before completion,
+    so if you use await internally, you need to properly make newcoming functions wait so that the integrity is not compromised.
+
     Args:
         use_time (float): Resource usage time compatible with time.time().
         use_resources (List[int]): Resource usage amounts.
@@ -273,7 +278,7 @@ class FilePastResourceQueue(IPastResourceQueue):
     # Delete old unnecessary information
     pos = self.pos_time_after(use_time - self.longest_period_in_seconds)
     # To obtain the difference, the previous information is required.
-    for i in range(max(0, pos - 1)):
+    for _ in range(max(0, pos - 1)):
       self.time_resource_queue.popleft()
 
   async def term(self) -> None:
