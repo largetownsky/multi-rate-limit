@@ -3,6 +3,7 @@
 import abc
 import aiofiles
 import bisect
+import os
 
 from aiofiles.threadpool.text import AsyncTextIOWrapper
 from collections import deque
@@ -15,6 +16,7 @@ class RateLimit:
     _resource_limit (int): Resource limit that can be used within the period.
     _period_in_seconds (float): Resource limit period.
   """
+
   def __init__(self, resource_limit: int, period_in_seconds: float):
     """Create a class to define a single resource limit.
 
@@ -52,6 +54,7 @@ class RateLimit:
 class SecondRateLimit(RateLimit):
   """An alias of RateLimit. Specify duration in seconds.
   """
+
   def __init__(self, resource_limit: int, period_in_seconds = 1.0):
     """Create a class to define a single resource limit.
 
@@ -64,6 +67,7 @@ class SecondRateLimit(RateLimit):
 class MinuteRateLimit(RateLimit):
   """A variant of RateLimit. Specify duration in minutes.
   """
+
   def __init__(self, resource_limit: int, period_in_minutes = 1.0):
     """Create a class to define a single resource limit.
 
@@ -76,6 +80,7 @@ class MinuteRateLimit(RateLimit):
 class HourRateLimit(RateLimit):
   """A variant of RateLimit. Specify duration in hours.
   """
+
   def __init__(self, resource_limit: int, period_in_hours = 1.0):
     """Create a class to define a single resource limit.
 
@@ -88,6 +93,7 @@ class HourRateLimit(RateLimit):
 class DayRateLimit(RateLimit):
   """A variant of RateLimit. Specify duration in days.
   """
+
   def __init__(self, resource_limit: int, period_in_days = 1.0):
     """Create a class to define a single resource limit.
 
@@ -111,6 +117,7 @@ class ResourceOverwriteError(Exception):
           Each resource usage amaount must not be negative.
       cause (Exception): Wrap and pass the exception you originally wanted to return.
   """
+
   def __init__(self, use_time: float, use_resources: List[int], cause: Exception):
     """Create an error to customize resource usage.
 
@@ -140,6 +147,7 @@ class ResourceOverwriteError(Exception):
 class IPastResourceQueue(metaclass=abc.ABCMeta):
   """An interface to customize how used resources are managed.
   """
+
   @abc.abstractmethod
   async def sum_resource_after(self, time: float, order: int) -> int:
     """Returns the amount of resources of specified order used after the specified time.
@@ -211,17 +219,28 @@ class FilePastResourceQueue(IPastResourceQueue):
 
 
   """
-  def __init__(self, len_resource: int, longest_period_in_seconds: float, file_path: Optional[str] = None):
+
+  def __init__(self, len_resource: int, longest_period_in_seconds: float):
     # Append the first element with time and accumulated resource usages.
-    self.time_resource_queue: deque[Tuple[float, List[int]]] = deque([(0, [0 for _ in range(len_resource)])])
-    self.longest_period_in_seconds: float = longest_period_in_seconds
+    self._time_resource_queue: deque[Tuple[float, List[int]]] = deque([(0, [0 for _ in range(len_resource)])])
+    self._longest_period_in_seconds: float = longest_period_in_seconds
+    self._file_path: Optional[str] = None
   
+  @classmethod
+  async def create(cls, len_resource: int, longest_period_in_seconds: float, file_path: Optional[str] = None):
+    queue = cls(len_resource, longest_period_in_seconds)
+    queue._file_path = file_path
+    if file_path is not None:
+      await queue._read_file(file_path)
+      await queue._write_file(file_path)
+    return queue
+
   def _parse_line(self, line: str) -> Tuple[float, List[int]]:
     line_core = line.strip()
     if len(line_core) == len(line):
       raise ValueError(f'Sudden file end : {line_core}')
     tokens = line_core.split('\t')
-    if len(tokens) != 1 + len(self.time_resource_queue[0][1]):
+    if len(tokens) != 1 + len(self._time_resource_queue[0][1]):
       raise ValueError(f'Resource length mismatch : {line_core}')
     try:
       use_time = float(tokens[0])
@@ -240,46 +259,55 @@ class FilePastResourceQueue(IPastResourceQueue):
         self.add(*self._parse_line(line))
   
   async def _write_file(self, file_path: str) -> None:
-    async with aiofiles.open(file_path, mode = 'w') as f:
-      for use_time, use_resources in self.time_resource_queue:
+    # Write to a work file
+    work_file_path = file_path + '._work_'
+    async with aiofiles.open(work_file_path, mode = 'w') as f:
+      for use_time, use_resources in self._time_resource_queue:
         await self._write_line(f, use_time, use_resources)
-
+      await f.flush()
+      os.fsync(f.fileno())
+    # Atomic replace
+    os.replace(work_file_path, file_path)
+   
   async def _append_file(self, file_path: str, use_time: float, use_resources: List[int]) -> None:
     async with aiofiles.open(file_path, mode = 'a') as f:
       await self._write_line(f, use_time, use_resources)
   
   def pos_time_after(self, time: float) -> int:
-    return bisect.bisect_right(self.time_resource_queue, time, key=lambda t: t[0])
+    return bisect.bisect_right(self._time_resource_queue, time, key=lambda t: t[0])
   
   async def sum_resource_after(self, time: float, order: int) -> int:
     pos = self.pos_time_after(time)
-    return self.time_resource_queue[-1][1][order] - self.time_resource_queue[max(0, pos - 1)][1][order]
+    return self._time_resource_queue[-1][1][order] - self._time_resource_queue[max(0, pos - 1)][1][order]
 
   def pos_accum_resouce_within(self, order: int, amount: int) -> int:
-    last_amount = self.time_resource_queue[-1][1][order]
-    return bisect.bisect_left(self.time_resource_queue, last_amount - amount, key=lambda t: t[1][order])
+    last_amount = self._time_resource_queue[-1][1][order]
+    return bisect.bisect_left(self._time_resource_queue, last_amount - amount, key=lambda t: t[1][order])
   
   async def time_accum_resource_within(self, order: int, amount: int) -> float:
     pos = self.pos_accum_resouce_within(order, amount)
-    return self.time_resource_queue[pos][0]
+    return self._time_resource_queue[pos][0]
   
   async def add(self, use_time: float, use_resources: List[int]) -> None:
-    last_elem = self.time_resource_queue[-1]
+    last_elem = self._time_resource_queue[-1]
     if use_time <= last_elem[0]:
       # Never add before last registered time
       use_time = last_elem[0]
       # For search uniqueness, information from the same time is merged.
       use_resources = [x + y for x, y in zip(last_elem[1], use_resources)]
       # Replace the last
-      self.time_resource_queue[-1] = use_time, use_resources
+      self._time_resource_queue[-1] = use_time, use_resources
       return
     # Append the last
-    self.time_resource_queue.append((use_time, [x + y for x, y in zip(last_elem[1], use_resources)]))
+    self._time_resource_queue.append((use_time, [x + y for x, y in zip(last_elem[1], use_resources)]))
     # Delete old unnecessary information
-    pos = self.pos_time_after(use_time - self.longest_period_in_seconds)
-    # To obtain the difference, the previous information is required.
+    pos = self.pos_time_after(use_time - self._longest_period_in_seconds)
+    # To obtain the difference, one additional previous information is required.
     for _ in range(max(0, pos - 1)):
-      self.time_resource_queue.popleft()
+      self._time_resource_queue.popleft()
+    # Log output to file for data persistence
+    if self._file_path is not None:
+      await self._append_file(self._file_path, use_time, use_resources)
 
   async def term(self) -> None:
     """Called when finished. Do nothing.

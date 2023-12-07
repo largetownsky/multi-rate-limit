@@ -79,7 +79,7 @@ def test_day_rate_limit(limit: int, period: float):
 async def test_past():
   # Empty queue
   queue = FilePastResourceQueue(2, 60)
-  assert len(queue.time_resource_queue) == 1
+  assert len(queue._time_resource_queue) == 1
   assert queue.pos_time_after(-0.01) == 0
   assert queue.pos_time_after(0) == 1
   assert await queue.sum_resource_after(-0.01, 0) == 0
@@ -90,7 +90,7 @@ async def test_past():
   assert await queue.time_accum_resource_within(1, 1) == 0
   # Single data queue
   await queue.add(100, [1, 2])
-  assert len(queue.time_resource_queue) == 2
+  assert len(queue._time_resource_queue) == 2
   assert queue.pos_time_after(-0.01) == 0
   assert queue.pos_time_after(0) == 1
   assert queue.pos_time_after(99) == 1
@@ -109,7 +109,7 @@ async def test_past():
   assert await queue.time_accum_resource_within(1, 2) == 0
   # Single data queue
   await queue.add(200, [1, 10])
-  assert len(queue.time_resource_queue) == 2
+  assert len(queue._time_resource_queue) == 2
   assert queue.pos_time_after(99) == 0
   assert queue.pos_time_after(100) == 1
   assert queue.pos_time_after(199) == 1
@@ -129,7 +129,7 @@ async def test_past():
   # Single data queue with a added value
   # Total: (200, [3, 10])
   await queue.add(199, [2, 0])
-  assert len(queue.time_resource_queue) == 2
+  assert len(queue._time_resource_queue) == 2
   assert queue.pos_time_after(99) == 0
   assert queue.pos_time_after(100) == 1
   assert queue.pos_time_after(199) == 1
@@ -150,7 +150,7 @@ async def test_past():
   # Inherited: (200, [3, 10])
   await queue.add(210, [1, 1])
   await queue.add(220, [2, 3])
-  assert len(queue.time_resource_queue) == 4
+  assert len(queue._time_resource_queue) == 4
   assert queue.pos_time_after(99) == 0
   assert queue.pos_time_after(100) == 1
   assert queue.pos_time_after(199) == 1

@@ -189,4 +189,12 @@ class MultiRateLimit:
         break
       res[2].cancel()
     # The internal process continues to run until all current tasks are completed
-    await self._past_queue.term()
+    # Reset the internal process bacause the it already start to consume the canceled task 
+    self._time_to_start()
+    rest_tasks = [self._past_queue.term()]
+    if self._in_process is not None:
+      rest_tasks.append(self._in_process)
+    dones, _ = await asyncio.wait(rest_tasks)
+    # Exception check
+    for d in dones:
+      d.result()
