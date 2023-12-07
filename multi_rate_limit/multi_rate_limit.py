@@ -120,16 +120,17 @@ class MultiRateLimit:
     self._in_process = asyncio.create_task(self._process())
   
   async def _resouce_sum_from_past(self, current_time: float) -> List[List[int]]:
-    return [[await self._past_queue.sum_resource_after(current_time - l.period_in_seconds, i) for l in ls]
-        for i, ls in enumerate(self._limits)]
+    times = [[(current_time - l.period_in_seconds) for l in ls] for ls in self._limits]
+    return await asyncio.gather(*[asyncio.gather(*[self._past_queue.sum_resource_after(t, i) for t in ts]) for i, ts in enumerate(times)])
 
   async def _resource_margin_from_past(self, current_time: float) -> List[int]:
     return [min([l.resource_limit - r for l, r in zip(ls, rs)])
         for ls, rs in zip(self._limits, await self._resouce_sum_from_past(current_time))]
 
   async def _time_to_start(self, sum_resourcs_without_past: List[int]) -> float:
-    return max([max([l.period_in_seconds + await self._past_queue.time_accum_resource_within(i, l.resource_limit - sr) for l in ls])
-        for i, (ls, sr) in enumerate(zip(self._limits, sum_resourcs_without_past))])
+    base_times = await asyncio.gather(*[asyncio.gather(*[self._past_queue.time_accum_resource_within
+        (i, l.resource_limit - sr) for l in ls]) for i, (ls, sr) in enumerate(zip(self._limits, sum_resourcs_without_past))])
+    return max([max([l.period_in_seconds + t for l, t in zip(ls, bt)]) for ls, bt in zip(self._limits, base_times)])
   
   def _add_next(self, use_resources: List[int], coro: Coroutine[Any, Any, Tuple[Optional[Tuple[float, List[int]]], Any]]
       , future: Future[Any]) -> ReservationTicket:
