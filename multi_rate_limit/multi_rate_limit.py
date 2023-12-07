@@ -35,20 +35,24 @@ class RateLimitStats:
 
 
 class MultiRateLimit:
-  def __init__(self, limits: List[List[RateLimit]]
-      , past_queue_factory: Callable[[int, float], IPastResourceQueue] = None, max_async_run = 1):
+  @classmethod
+  async def create(cls, limits: List[List[RateLimit]]
+      , past_queue_factory: Callable[[int, float], Coroutine[Any, Any, IPastResourceQueue]] = None, max_async_run = 1):
     if len(limits) <= 0 or min([len(ls) for ls in limits]) <= 0 or max_async_run <= 0:
       raise ValueError(f'Invalid None positive length or values : {[len(ls) for ls in limits]}, {max_async_run}')
     if past_queue_factory is None:
-      past_queue_factory = lambda len_resource, longest_period_in_seconds: FilePastResourceQueue(len_resource, longest_period_in_seconds)
+      past_queue_factory = lambda len_resource, longest_period_in_seconds: FilePastResourceQueue.create(
+          len_resource, longest_period_in_seconds)
+    mrl = cls()
     # Copy for overwrite safety
-    self._limits = [[*ls] for ls in limits]
-    self._past_queue = past_queue_factory(len(limits), max([max([l.period_in_seconds for l in ls]) for ls in limits]))
-    self._current_buffer = CurrentResourceBuffer(len(limits), max_async_run)
-    self._next_queue = NextResourceQueue(len(limits))
-    self._loop = asyncio.get_running_loop()
-    self._in_process: Optional[Task] = None
-    self._teminated: bool = False
+    mrl._limits = [[*ls] for ls in limits]
+    mrl._past_queue = await past_queue_factory(len(limits), max([max([l.period_in_seconds for l in ls]) for ls in limits]))
+    mrl._current_buffer = CurrentResourceBuffer(len(limits), max_async_run)
+    mrl._next_queue = NextResourceQueue(len(limits))
+    mrl._loop = asyncio.get_running_loop()
+    mrl._in_process: Optional[Task] = None
+    mrl._teminated: bool = False
+    return mrl
   
   async def _process(self) -> None:
     ex: Optional[Exception] = None

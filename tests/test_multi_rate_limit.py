@@ -16,9 +16,10 @@ from multi_rate_limit.multi_rate_limit import MultiRateLimit, RateLimitStats
       ([[RateLimit(10, 60)]], 0),
     ]
 )
-def test_multi_rate_limit_init_error(limits: List[List[RateLimit]], max_async_run: int):
+@pytest.mark.asyncio
+async def test_multi_rate_limit_init_error(limits: List[List[RateLimit]], max_async_run: int):
   with pytest.raises(ValueError):
-    MultiRateLimit(limits, None, max_async_run)
+    await MultiRateLimit.create(limits, None, max_async_run)
 
 
 async def wait_and_return(wait_in_seconds: float, result: Any):
@@ -56,7 +57,7 @@ async def test_multi_rate_limit():
   # (3.3, [1, 20])
   # (4.5, [0, 25])
   limits = [[RateLimit(10, 1.5), RateLimit(15, 3)], [RateLimit(100, 3)]]
-  mrl = MultiRateLimit(limits, None, 2)
+  mrl = await MultiRateLimit.create(limits, None, 2)
   with pytest.raises(ValueError):
     mrl.reserve([1, 2], None)
   with pytest.raises(ValueError):
