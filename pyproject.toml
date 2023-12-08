@@ -19,3 +19,7 @@ sphinx = "^7.2.6"
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
+
+[project.urls]
+repository = "https://github.com/largetownsky/multi-rate-limit"
+docs = "https://largetownsky.github.io/multi-rate-limit/"
