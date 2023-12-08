@@ -11,10 +11,3 @@ Welcome to multi-rate-limit's documentation!
    :caption: Contents:
 
    module
-
-Indices and tables
-==================
-
-* :ref:`genindex`
-* :ref:`modindex`
-* :ref:`search`
