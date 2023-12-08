@@ -1,3 +1,4 @@
 # ToDo
-* Docstrings
+* url of init.py
+* CI
 * ReadMe

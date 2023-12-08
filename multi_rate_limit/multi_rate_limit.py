@@ -1,3 +1,5 @@
+"""Classes for using multiple resources while observing multiple RateLimits.
+"""
 import asyncio
 import time
 
@@ -11,33 +13,89 @@ from multi_rate_limit.resource_queue import CurrentResourceBuffer, NextResourceQ
 
 @dataclass
 class ReservationTicket:
+  """Class for receiving the results of processing executed through MultiRateLimit.
+
+  Attributes:
+    reserve_number (int): Number to interrupt execution.
+    future (Future[Any]): Future to receive execution results.
+  """
   reserve_number: int
   future: Future[Any]
 
 
 @dataclass
 class RateLimitStats:
+  """Class that represents resource usage status.
+
+  Attributes:
+    limits (List[List[RateLimit]]): Resource limits
+    past_uses (List[List[int]]): Total resource usage that has been executed for each resource limit.
+        (For 1 minute limit, resource usage for the past 1 minute.)
+    current_uses (List[int]): Total running resource usage for each resource.
+    next_uses (List[int]): Total waiting resource usage for each resource.
+  """
   limits: List[List[RateLimit]]
   past_uses: List[List[int]]
   current_uses: List[int]
   next_uses: List[int]
 
   def past_use_percents(self) -> List[List[float]]:
-    return [[p / l.resource_limit for l, p in zip(ls, ps)] for ls, ps in zip(self.limits, self.past_uses)]
+    """Returns the percentage of total executed resource usage against each resource limit.
+
+    Returns:
+        List[List[float]]: The percentage of total executed resource usage against each resource limit.
+    """
+    return [[p * 100 / l.resource_limit for l, p in zip(ls, ps)] for ls, ps in zip(self.limits, self.past_uses)]
 
   def current_use_percents(self) -> List[List[float]]:
-    return [[(p + c) / l.resource_limit for l, p in zip(ls, ps)]
+    """Returns the percentage of total executed and running resource usage relative to each resource limit.
+
+    Returns:
+        List[List[float]]: The percentage of total executed and running resource usage relative to each resource limit.
+    """
+    return [[(p + c) * 100 / l.resource_limit for l, p in zip(ls, ps)]
         for ls, ps, c in zip(self.limits, self.past_uses, self.current_uses)]
 
   def next_use_percents(self) -> List[List[float]]:
-    return [[(p + c + n) / l.resource_limit for l, p in zip(ls, ps)]
+    """Returns the total usage of executed, running, and waiting resources as a percentage of each resource limit.
+
+    Returns:
+        List[List[float]]: The total usage of executed, running, and waiting resources as a percentage of each resource limit.
+    """
+    return [[(p + c + n) * 100 / l.resource_limit for l, p in zip(ls, ps)]
         for ls, ps, c, n in zip(self.limits, self.past_uses, self.current_uses, self.next_uses)]
 
 
 class MultiRateLimit:
+  """Class for using multiple resources while observing multiple RateLimits.
+
+  Attributes:
+    _limits (List[List[RateLimit]]): Resource limits.
+    _past_queue (IPastResourceQueue): Executed resource usage manager.
+    _current_buffer (CurrentResourceBuffer): Running resource usage manager.
+    _next_queue (NextResourceQueue): Waiting resource usage manager.
+    _loop (AbstractEventLoop): Cached event loop.
+    _in_process (Optional[Task]): Asynchronous execution tasks for internal processing.
+    _terminated (bool): Whether term() has been called.
+  """
   @classmethod
   async def create(cls, limits: List[List[RateLimit]]
       , past_queue_factory: Callable[[int, float], Coroutine[Any, Any, IPastResourceQueue]] = None, max_async_run = 1):
+    """Create an object for using multiple resources while observing multiple RateLimits.
+
+    Args:
+        limits (List[List[RateLimit]]): Resource limits.
+        past_queue_factory (Callable[[int, float], Coroutine[Any, Any, IPastResourceQueue]], optional):
+            Pass the factory method to make the executed resource usage manager.
+            The default is None, in which case it is managed only in memory.
+        max_async_run (int, optional): Maximum asynchronous concurrency. Defaults to 1.
+
+    Raises:
+        ValueError: If the resource limit array length is 0, or if any value of the resource limit or max_async_run is non-positive.
+
+    Returns:
+        _type_: Object for using multiple resources while observing multiple RateLimits.
+    """
     if len(limits) <= 0 or min([len(ls) for ls in limits]) <= 0 or max_async_run <= 0:
       raise ValueError(f'Invalid None positive length or values : {[len(ls) for ls in limits]}, {max_async_run}')
     if past_queue_factory is None:
@@ -55,6 +113,11 @@ class MultiRateLimit:
     return mrl
   
   async def _process(self) -> None:
+    """Internal processing that manages waiting, running, and executed state transitions.
+
+    Raises:
+        Exception: In case of unknown logic errors.
+    """
     ex: Optional[Exception] = None
     while True:
       try:
@@ -119,30 +182,82 @@ class MultiRateLimit:
       raise ex
 
   def _try_process(self) -> None:
+    """Trigger internal processing.
+    """
     if self._in_process is not None:
       self._in_process.cancel()
     self._in_process = asyncio.create_task(self._process())
   
   async def _resouce_sum_from_past(self, current_time: float) -> List[List[int]]:
+    """For each resource limit, calculate the resource usage during the limit period given the current time.
+
+    Args:
+        current_time (float): The current time compatible with time.time().
+
+    Returns:
+        List[List[int]]: The resource usage during the limit period for each resource limit.
+    """
     times = [[(current_time - l.period_in_seconds) for l in ls] for ls in self._limits]
     return await asyncio.gather(*[asyncio.gather(*[self._past_queue.sum_resource_after(t, i) for t in ts]) for i, ts in enumerate(times)])
 
   async def _resource_margin_from_past(self, current_time: float) -> List[int]:
+    """Calculate how much of each resource can be allocated to resource consumption during execution.
+
+    Args:
+        current_time (float): The current time compatible with time.time().
+
+    Returns:
+        List[int]: How much of each resource can be allocated to resource consumption during execution.
+    """
     return [min([l.resource_limit - r for l, r in zip(ls, rs)])
         for ls, rs in zip(self._limits, await self._resouce_sum_from_past(current_time))]
 
   async def _time_to_start(self, sum_resourcs_without_past: List[int]) -> float:
+    """Returns the time when the next execution can start based on the current and next execution's resource usage.
+
+    Args:
+        sum_resourcs_without_past (List[int]): The current and next execution's resource usage.
+
+    Returns:
+        float: The time compatible with time.time() when the next execution can start.
+    """
     base_times = await asyncio.gather(*[asyncio.gather(*[self._past_queue.time_accum_resource_within
         (i, l.resource_limit - sr) for l in ls]) for i, (ls, sr) in enumerate(zip(self._limits, sum_resourcs_without_past))])
     return max([max([l.period_in_seconds + t for l, t in zip(ls, bt)]) for ls, bt in zip(self._limits, base_times)])
   
   def _add_next(self, use_resources: List[int], coro: Coroutine[Any, Any, Tuple[Optional[Tuple[float, List[int]]], Any]]
       , future: Future[Any]) -> ReservationTicket:
+    """Puts the task on a waiting queue and returns a ticket to receive the result.
+
+    Args:
+        use_resources (List[int]): Resource reservation amount.
+        coro (Coroutine[Any, Any, Tuple[Optional[Tuple[float, List[int]]], Any]]):
+            Coroutine object that is the process to reserve
+        future (Future[Any]): Future for receiving processing results.
+
+    Returns:
+        ReservationTicket: Ticket for receiving processing results.
+    """
     reserve_number = self._next_queue.push(use_resources, coro, future)
     return ReservationTicket(reserve_number, future)
 
   def reserve(self, use_resources: List[int]
       , coro: Coroutine[Any, Any, Tuple[Optional[Tuple[float, List[int]]], Any]]) -> ReservationTicket:
+    """Schedules the task and returns a ticket to receive the result.
+
+    Args:
+        use_resources (List[int]): Resource reservation amount.
+        coro (Coroutine[Any, Any, Tuple[Optional[Tuple[float, List[int]]], Any]]):
+            Coroutine object that is the process to reserve
+
+    Raises:
+        Exception: If already terminated.
+        ValueError: In case of resources list length mismatch or any single resource reservation exceeds its limit. 
+        ValueError: If the passed process is not a coroutine.
+
+    Returns:
+        ReservationTicket: Ticket to receive the result.
+    """
     if self._teminated:
       raise Exception('Already terminated')
     use_resources = check_resources(use_resources, len(self._limits))
@@ -162,6 +277,20 @@ class MultiRateLimit:
     return ticket
 
   def cancel(self, number: int) -> Optional[Tuple[List[int], Coroutine[Any, Any, Tuple[Optional[Tuple[float, List[int]]], Any]]]]:
+    """Cancel the reservation of a waiting coroutine.
+
+    This process automatically cancels the future of the ticket.
+
+    Args:
+        number (int): Ticket number.
+
+    Raises:
+        Exception: If already terminated.
+
+    Returns:
+        Optional[Tuple[List[int], Coroutine[Any, Any, Tuple[Optional[Tuple[float, List[int]]], Any]]]]:
+            Reserved resource amount and coroutine object.
+    """
     if self._teminated:
       raise Exception('Already terminated')
     res = self._next_queue.cancel(number)
@@ -174,7 +303,19 @@ class MultiRateLimit:
       self._try_process()
     return use_resources, coro
 
-  async def stats(self, current_time = None) -> RateLimitStats:
+  async def stats(self, current_time: Optional[float] = None) -> RateLimitStats:
+    """Returns resource usage.
+
+    Args:
+        current_time (Optional[float], optional): The current time.
+            The default is None, in which case the result of time.time() is used.
+
+    Raises:
+        Exception: If already terminated.
+
+    Returns:
+        RateLimitStats: Resource usage.
+    """
     if self._teminated:
       raise Exception('Already terminated')
     if current_time is None:
@@ -183,6 +324,14 @@ class MultiRateLimit:
         , [*self._current_buffer.sum_resources], [*self._next_queue.sum_resources])
   
   async def term(self) -> None:
+    """End processing.
+
+    Cancels all waiting processes and waits for all currently running processes to finish
+    and for resource managers that have already been executed to terminate.
+
+    Raises:
+        Exception: If already terminated.
+    """
     if self._teminated:
       raise Exception('Already terminated')
     self._teminated = True
@@ -193,12 +342,7 @@ class MultiRateLimit:
         break
       res[2].cancel()
     # The internal process continues to run until all current tasks are completed
-    # Reset the internal process bacause the it already start to consume the canceled task 
-    self._time_to_start()
-    rest_tasks = [self._past_queue.term()]
-    if self._in_process is not None:
-      rest_tasks.append(self._in_process)
-    dones, _ = await asyncio.wait(rest_tasks)
-    # Exception check
-    for d in dones:
-      d.result()
+    # Reset the internal process bacause the it already start to consume the canceled task
+    self._try_process()
+    await self._in_process
+    await self._past_queue.term()

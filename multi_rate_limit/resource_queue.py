@@ -1,3 +1,5 @@
+"""Classes for internal use.
+"""
 from asyncio import create_task, Future, Task
 from typing import Any, Coroutine, Dict, List, Optional, Tuple
 
