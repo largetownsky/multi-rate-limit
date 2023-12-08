@@ -1,4 +1,2 @@
 *.pyc
 dist
-docs/build/*
-!docs/build/index.html
