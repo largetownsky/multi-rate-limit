@@ -5,7 +5,7 @@ multi-rate-limit
 
 [multi-rate-limit](https://largetownsky.github.io/multi-rate-limit/) is a package for using multiple resources while observing multiple RateLimits.
 
-![multi-rate-limit image](multi-rate-limit.png)
+![multi-rate-limit image](https://raw.githubusercontent.com/largetownsky/multi-rate-limit/main/multi-rate-limit.png)
 
 # Install
 
