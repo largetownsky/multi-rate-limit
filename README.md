@@ -1,7 +1,12 @@
 multi-rate-limit
 ================
 
-![CI badge](https://github.com/largetownsky/multi-rate-limit/actions/workflows/python-package.yml/badge.svg)
+[![PyPI](https://img.shields.io/pypi/v/multi-rate-limit.svg)](https://pypi.python.org/pypi/multi-rate-limit)
+[![CI badge](https://github.com/largetownsky/multi-rate-limit/actions/workflows/python-package.yml/badge.svg)](https://github.com/largetownsky/multi-rate-limit/actions)
+![Tests](https://raw.githubusercontent.com/largetownsky/multi-rate-limit/main/tests.svg)
+![Code coverage](https://raw.githubusercontent.com/largetownsky/multi-rate-limit/main/coverage.svg)
+[![Python versions](https://img.shields.io/pypi/pyversions/multi-rate-limit.svg)](https://github.com/largetownsky/multi-rate-limit)
+
 
 [multi-rate-limit](https://largetownsky.github.io/multi-rate-limit/) is a package for using multiple resources while observing multiple RateLimits.
 
@@ -163,7 +168,6 @@ async def main():
   ticket2 = mrl.reserve([3, 2], work('2', 1, [2, 2]))
   _, coro = mrl.cancel(ticket1.reserve_number)
   await cancel_coroutine_to_avoid_runtime_warning(coro)
-  # sleep short time to run the internal dispatch task.
   await print_stats(mrl)
   ticket3 = mrl.reserve([1, 0], work('3', 1, [0, 1]))
   ticket4 = mrl.reserve([0, 2], work('4', 1, None))

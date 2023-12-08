@@ -19,6 +19,8 @@ pytest = "^7.4.3"
 pytest-asyncio = "^0.23.2"
 pytest-datadir = "^1.5.0"
 sphinx = "^7.2.6"
+pytest-cov = "^4.1.0"
+pytest-local-badge = "^1.0.3"
 
 [build-system]
 requires = ["poetry-core"]
