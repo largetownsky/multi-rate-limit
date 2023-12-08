@@ -20,7 +20,7 @@ __all__ = [
 ]
 
 __copyright__    = 'Copyright 2023-present largetownsky'
-__version__      = '0.1.3'
+__version__      = '0.1.4'
 __license__      = 'MIT'
 __author__       = 'largetownsky'
 __author_email__ = 'large.town.sky@gmail.com'
