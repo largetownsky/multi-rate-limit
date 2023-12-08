@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "multi-rate-limit"
-version = "0.1.0"
+version = "0.1.1"
 description = "Package for using multiple resources while observing multiple RateLimits."
 authors = ["largetownsky <large.town.sky@gmail.com>"]
 readme = "README.md"
