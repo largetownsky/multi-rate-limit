@@ -1,5 +1,9 @@
-import asyncio
+import os
 import pytest
+import shutil
+
+from aiofiles.os import wrap
+from os.path import isfile
 
 from multi_rate_limit.rate_limit import RateLimit, SecondRateLimit, MinuteRateLimit, HourRateLimit, DayRateLimit, FilePastResourceQueue
 
@@ -187,3 +191,27 @@ async def test_past():
   assert await queue.time_accum_resource_within(1, 4) == 200
   assert await queue.time_accum_resource_within(1, 13) == 200
   assert await queue.time_accum_resource_within(1, 14) == 100
+
+@pytest.mark.asyncio
+async def test_past_with_file(datadir):
+  # Actually, the contents of datadir are copied to a temporary folder
+  original_path = (datadir / 'original.tsv')
+  # Copy to backup the original
+  test_path = (datadir / 'test.tsv')
+  await wrap(shutil.copyfile)(original_path, test_path)
+  queue = await FilePastResourceQueue.create(2, 60, test_path)
+  assert len(queue._time_resource_queue) == 4
+  assert queue._time_resource_queue[0] == (0, [0, 0])
+  assert queue._time_resource_queue[1] == (100, [1, 10])
+  assert queue._time_resource_queue[2] == (110, [2, 15])
+  assert queue._time_resource_queue[3] == (120, [4, 30])
+  await queue.add(175, [10, 30])
+  await queue.term()
+  queue = await FilePastResourceQueue.create(2, 60, test_path)
+  assert len(queue._time_resource_queue) == 3
+  assert queue._time_resource_queue[0] == (110, [2, 15])
+  assert queue._time_resource_queue[1] == (120, [4, 30])
+  assert queue._time_resource_queue[2] == (175, [14, 60])
+  # Delete the temporary folder just in case
+  if await wrap(isfile)(test_path):
+    await wrap(os.remove)(test_path)

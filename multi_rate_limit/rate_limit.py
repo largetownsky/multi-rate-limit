@@ -5,8 +5,10 @@ import aiofiles
 import bisect
 import os
 
+from aiofiles.os import replace, wrap
 from aiofiles.threadpool.text import AsyncTextIOWrapper
 from collections import deque
+from os.path import isfile
 from typing import List, Optional, Tuple
 
 class RateLimit:
@@ -254,20 +256,24 @@ class FilePastResourceQueue(IPastResourceQueue):
     await f.write(f'{line}\n')
 
   async def _read_file(self, file_path: str) -> None:
+    if not await wrap(isfile)(file_path):
+      # Ignore if file does not exist
+      return
     async with aiofiles.open(file_path) as f:
       async for line in f:
-        self.add(*self._parse_line(line))
+        self._time_resource_queue.append(self._parse_line(line))
+      self._trim()
   
   async def _write_file(self, file_path: str) -> None:
     # Write to a work file
-    work_file_path = file_path + '._work_'
+    work_file_path = str(file_path) + '._work_'
     async with aiofiles.open(work_file_path, mode = 'w') as f:
       for use_time, use_resources in self._time_resource_queue:
         await self._write_line(f, use_time, use_resources)
       await f.flush()
-      os.fsync(f.fileno())
+      await wrap(os.fsync)(f.fileno())
     # Atomic replace
-    os.replace(work_file_path, file_path)
+    await replace(work_file_path, file_path)
    
   async def _append_file(self, file_path: str, use_time: float, use_resources: List[int]) -> None:
     async with aiofiles.open(file_path, mode = 'a') as f:
@@ -300,14 +306,18 @@ class FilePastResourceQueue(IPastResourceQueue):
       return
     # Append the last
     self._time_resource_queue.append((use_time, [x + y for x, y in zip(last_elem[1], use_resources)]))
+    self._trim()
+    # Log output to file for data persistence
+    if self._file_path is not None:
+      await self._append_file(self._file_path, *self._time_resource_queue[-1])
+
+  def _trim(self):
     # Delete old unnecessary information
-    pos = self.pos_time_after(use_time - self._longest_period_in_seconds)
+    last_time = self._time_resource_queue[-1][0]
+    pos = self.pos_time_after(last_time - self._longest_period_in_seconds)
     # To obtain the difference, one additional previous information is required.
     for _ in range(max(0, pos - 1)):
       self._time_resource_queue.popleft()
-    # Log output to file for data persistence
-    if self._file_path is not None:
-      await self._append_file(self._file_path, use_time, use_resources)
 
   async def term(self) -> None:
     """Called when finished. Do nothing.
