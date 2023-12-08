@@ -245,6 +245,16 @@ class MultiRateLimit:
       , coro: Coroutine[Any, Any, Tuple[Optional[Tuple[float, List[int]]], Any]]) -> ReservationTicket:
     """Schedules the task and returns a ticket to receive the result.
 
+    Unless explicitly stated in the return value or exception parameter of coroutine,
+    the use_resources of this function are considered to have been consumed at the end of coroutine execution.
+    If you want to change this behavior because you cannot know the exact resource consumption until after execution,
+    please override the resource consumption timing and amount using coroutine's return value or ResourceOverwriteError parameter.
+
+    The return value of coroutine is in the following format.
+    ((use_time, [use_resource1, use_resource2,,,]), return_value_to_user)
+    If you do not want to overwrite, please use the followin format.
+    (None, return_value_to_user)
+
     Args:
         use_resources (List[int]): Resource reservation amount.
         coro (Coroutine[Any, Any, Tuple[Optional[Tuple[float, List[int]]], Any]]):
@@ -323,7 +333,7 @@ class MultiRateLimit:
     return RateLimitStats([[*ls] for ls in self._limits], await self._resouce_sum_from_past(current_time)
         , [*self._current_buffer.sum_resources], [*self._next_queue.sum_resources])
   
-  async def term(self) -> None:
+  async def term(self) -> List[Coroutine[Any, Any, Tuple[Optional[Tuple[float, List[int]]], Any]]]:
     """End processing.
 
     Cancels all waiting processes and waits for all currently running processes to finish
@@ -331,7 +341,12 @@ class MultiRateLimit:
 
     Raises:
         Exception: If already terminated.
+
+    Returns:
+        List[Coroutine[Any, Any, Tuple[Optional[Tuple[float, List[int]]], Any]]]:
+            Waiting coroutines.
     """
+    coros: List[Coroutine[Any, Any, Tuple[Optional[Tuple[float, List[int]]], Any]]] = []
     if self._teminated:
       raise Exception('Already terminated')
     self._teminated = True
@@ -340,9 +355,12 @@ class MultiRateLimit:
       res = self._next_queue.pop()
       if res is None:
         break
-      res[2].cancel()
+      _, coro, future = res
+      coros.append(coro)
+      future.cancel()
     # The internal process continues to run until all current tasks are completed
     # Reset the internal process bacause the it already start to consume the canceled task
     self._try_process()
     await self._in_process
     await self._past_queue.term()
+    return coros
