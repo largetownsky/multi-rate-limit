@@ -132,7 +132,7 @@ Only while waiting for execution, you can cancel using the ticket number as show
 import asyncio
 import time
 
-from multi_rate_limit import MultiRateLimit, MinuteRateLimit, DayRateLimit, FilePastResourceQueue
+from multi_rate_limit import MultiRateLimit, MinuteRateLimit, DayRateLimit
 from typing import List, Optional
 
 async def work(name: str, time_required: float, overwrite_resources: Optional[List[int]]):
@@ -155,10 +155,6 @@ async def print_stats(mrl: MultiRateLimit):
   print(f'Past + current resource percentage : {stats.current_use_percents()}')
   print(f'Past + current + next resource percentage : {stats.next_use_percents()}')
 
-async def cancel_coroutine_to_avoid_runtime_warning(coro):
-  task = asyncio.create_task(coro)
-  task.cancel()
-
 async def main():
   # Create MultiRateLimit with 3 RateLimits and 3 max async run.
   mrl = await MultiRateLimit.create([[MinuteRateLimit(3, 0.1), DayRateLimit(100)], [MinuteRateLimit(10)]],
@@ -166,18 +162,15 @@ async def main():
       3)
   ticket1 = mrl.reserve([1, 3], work('1', 1, None))
   ticket2 = mrl.reserve([3, 2], work('2', 1, [2, 2]))
-  _, coro = mrl.cancel(ticket1.reserve_number)
-  await cancel_coroutine_to_avoid_runtime_warning(coro)
+  mrl.cancel(ticket1.reserve_number, True)
   await print_stats(mrl)
-  ticket3 = mrl.reserve([1, 0], work('3', 1, [0, 1]))
-  ticket4 = mrl.reserve([0, 2], work('4', 1, None))
-  ticket5 = mrl.reserve([1, 1], work('5', 1, None))
-  ticket6 = mrl.reserve([2, 2], work('6', 1, None))
+  mrl.reserve([1, 0], work('3', 1, [0, 1]))
+  mrl.reserve([0, 2], work('4', 1, None))
+  mrl.reserve([1, 1], work('5', 1, None))
+  mrl.reserve([2, 2], work('6', 1, None))
   await ticket2.future
   await print_stats(mrl)
-  coros = await mrl.term()
-  for coro in coros:
-    await cancel_coroutine_to_avoid_runtime_warning(coro)
+  await mrl.term(True)
 
 asyncio.run(main())
 ```
