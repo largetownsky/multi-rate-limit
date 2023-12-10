@@ -4,6 +4,7 @@ import asyncio
 import time
 
 from asyncio import Future, Task
+from collections.abc import KeysView
 from dataclasses import dataclass
 from typing import Any, Callable, Coroutine, List, Optional, Tuple
 
@@ -111,6 +112,38 @@ class MultiRateLimit:
     mrl._in_process: Optional[Task] = None
     mrl._teminated: bool = False
     return mrl
+  
+  def termed(self) -> bool:
+    """Returns whether this object is termed.
+
+    Returns:
+        bool: Whether this object is termed.
+    """
+    return self._teminated
+  
+  def runnings(self) -> int:
+    """Returns the number of currently running coroutines.
+
+    Returns:
+        int: The number of currently running coroutines.
+    """
+    return self._current_buffer.active_run
+  
+  def waitings(self) -> int:
+    """Returns the number of waiting coroutines.
+
+    Returns:
+        int: The number of waiting coroutines.
+    """
+    return len(self._next_queue.number_to_resource_coro_future)
+  
+  def waiting_numbers(self) -> KeysView[int]:
+    """Returns waiting coroutines' reservation numbers.
+
+    Returns:
+        KeysView[int]: Waiting coroutines' reservation numbers.
+    """
+    return self._next_queue.number_to_resource_coro_future.keys()
   
   async def _process(self) -> None:
     """Internal processing that manages waiting, running, and executed state transitions.
