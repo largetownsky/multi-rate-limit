@@ -5,7 +5,8 @@ import shutil
 from aiofiles.os import wrap
 from os.path import isfile
 
-from multi_rate_limit.rate_limit import RateLimit, SecondRateLimit, MinuteRateLimit, HourRateLimit, DayRateLimit, FilePastResourceQueue
+from multi_rate_limit.rate_limit import RateLimit, SecondRateLimit, MinuteRateLimit, HourRateLimit, DayRateLimit
+from multi_rate_limit.rate_limit import FilePastResourceQueue, IPastResourceQueue, ResourceOverwriteError
 
 @pytest.mark.parametrize(
     "limit, period",
@@ -77,6 +78,20 @@ def test_day_rate_limit(limit: int, period: float):
   rl = DayRateLimit(limit, period)
   assert rl.period_in_seconds == 86400 * period
   assert rl.resource_limit == limit
+
+
+def test_resource_overwrite_error():
+  use_time = 100
+  use_resources = [1, 2]
+  cause = ValueError()
+  error = ResourceOverwriteError(use_time, use_resources, cause)
+  assert error.use_time == use_time
+  assert error.use_resources == use_resources
+  assert error.cause == cause
+  text = str(error)
+  assert text.find(str(use_time)) >= 0
+  assert text.find(str(use_resources)) >= 0
+  assert text.find(str(cause)) >= 0
 
 
 @pytest.mark.asyncio
@@ -215,3 +230,22 @@ async def test_past_with_file(datadir):
   # Delete the temporary folder just in case
   if await wrap(isfile)(test_path):
     await wrap(os.remove)(test_path)
+
+@pytest.mark.asyncio
+async def test_past_parse_line():
+  queue = await FilePastResourceQueue.create(2, 60)
+  with pytest.raises(ValueError):
+    # Lack of line terminator
+    queue._parse_line('100\t1\t2')
+  with pytest.raises(ValueError):
+    # Length mismatch
+    queue._parse_line('100\t1\n')
+  with pytest.raises(ValueError):
+    # Number format error
+    queue._parse_line('100\t1\tq\n')
+
+@pytest.mark.asyncio
+async def test_past_not_found(datadir):
+  not_found_file = (datadir / 'not_found.tsv')
+  queue = await FilePastResourceQueue.create(2, 60, not_found_file)
+  assert len(queue._time_resource_queue) == 1

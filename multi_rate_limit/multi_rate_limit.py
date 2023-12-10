@@ -4,6 +4,7 @@ import asyncio
 import time
 
 from asyncio import Future, Task
+from collections.abc import KeysView
 from dataclasses import dataclass
 from typing import Any, Callable, Coroutine, List, Optional, Tuple
 
@@ -112,6 +113,38 @@ class MultiRateLimit:
     mrl._teminated: bool = False
     return mrl
   
+  def termed(self) -> bool:
+    """Returns whether this object is termed.
+
+    Returns:
+        bool: Whether this object is termed.
+    """
+    return self._teminated
+  
+  def runnings(self) -> int:
+    """Returns the number of currently running coroutines.
+
+    Returns:
+        int: The number of currently running coroutines.
+    """
+    return self._current_buffer.active_run
+  
+  def waitings(self) -> int:
+    """Returns the number of waiting coroutines.
+
+    Returns:
+        int: The number of waiting coroutines.
+    """
+    return len(self._next_queue.number_to_resource_coro_future)
+  
+  def waiting_numbers(self) -> KeysView[int]:
+    """Returns waiting coroutines' reservation numbers.
+
+    Returns:
+        KeysView[int]: Waiting coroutines' reservation numbers.
+    """
+    return self._next_queue.number_to_resource_coro_future.keys()
+  
   async def _process(self) -> None:
     """Internal processing that manages waiting, running, and executed state transitions.
 
@@ -154,14 +187,14 @@ class MultiRateLimit:
             time_to_start = await self._time_to_start(sum_resources)
             delay = max(0, time_to_start - current_time)
             if delay <= 0:
-              raise ValueError('Internal logic error')
+              raise Exception('Internal logic error')
             break
         # Wait for current buffer (and past queue to free up space)
         tasks = [t for t in self._current_buffer.task_buffer if t is not None]
         if delay > 0:
           tasks.append(asyncio.create_task(asyncio.sleep(delay), name=''))
         if len(tasks) <= 0:
-          raise ValueError('Internal logic error')
+          raise Exception('Internal logic error')
         dones, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
         current_time = time.time()
         for done in dones:
@@ -286,13 +319,16 @@ class MultiRateLimit:
       self._try_process()
     return ticket
 
-  def cancel(self, number: int) -> Optional[Tuple[List[int], Coroutine[Any, Any, Tuple[Optional[Tuple[float, List[int]]], Any]]]]:
+  def cancel(self, number: int, auto_close: bool = False) -> Optional[Tuple[List[int], Coroutine[Any, Any, Tuple[Optional[Tuple[float, List[int]]], Any]]]]:
     """Cancel the reservation of a waiting coroutine.
 
     This process automatically cancels the future of the ticket.
 
     Args:
         number (int): Ticket number.
+        auto_close (bool, optional): If true, automatically close the canceled coroutine. Defaults to False.
+            This coroutine can be reused. But you don't reuse it, Runtime warning will occure when the program finish.
+            Automatic close can suppress this warning.
 
     Raises:
         Exception: If already terminated.
@@ -309,6 +345,8 @@ class MultiRateLimit:
     use_resources, coro, future, is_next_pop = res
     # Cancel it so you don't have to wait forever due to client's logic mistakes
     future.cancel()
+    if auto_close:
+      coro.close()
     if is_next_pop and not self._current_buffer.is_full():
       self._try_process()
     return use_resources, coro
@@ -333,11 +371,16 @@ class MultiRateLimit:
     return RateLimitStats([[*ls] for ls in self._limits], await self._resouce_sum_from_past(current_time)
         , [*self._current_buffer.sum_resources], [*self._next_queue.sum_resources])
   
-  async def term(self) -> List[Coroutine[Any, Any, Tuple[Optional[Tuple[float, List[int]]], Any]]]:
+  async def term(self, auto_close: bool = False) -> List[Coroutine[Any, Any, Tuple[Optional[Tuple[float, List[int]]], Any]]]:
     """End processing.
 
     Cancels all waiting processes and waits for all currently running processes to finish
     and for resource managers that have already been executed to terminate.
+
+    Args:
+        auto_close (bool, optional): If true, automatically close the canceled coroutine. Defaults to False.
+            This coroutine can be reused. But you don't reuse it, Runtime warning will occure when the program finish.
+            Automatic close can suppress this warning.
 
     Raises:
         Exception: If already terminated.
@@ -358,6 +401,8 @@ class MultiRateLimit:
       _, coro, future = res
       coros.append(coro)
       future.cancel()
+      if auto_close:
+        coro.close()
     # The internal process continues to run until all current tasks are completed
     # Reset the internal process bacause the it already start to consume the canceled task
     self._try_process()
