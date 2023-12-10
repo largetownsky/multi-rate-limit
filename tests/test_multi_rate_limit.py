@@ -141,3 +141,14 @@ async def test_multi_rate_limit():
   await check_stats(mrl, limits, [[6, 13], [93]], [0, 0], [0, 25]) # Get caught up in the limits[1][0]
   assert await t2.future == 'r2'
   await check_stats(mrl, limits, [[1, 6], [95]], [0, 0], [0, 0])
+
+@pytest.mark.asyncio
+async def test_multi_rate_limit_auto_close():
+  limits = [[RateLimit(10, 1.5), RateLimit(15, 3)], [RateLimit(100, 3)]]
+  mrl = await MultiRateLimit.create(limits, None, 2)
+  ticket = mrl.reserve([1, 2], wait_and_return(1, (None, None)))
+  mrl.cancel(ticket.reserve_number, True)
+  await mrl.term()
+  mrl = await MultiRateLimit.create(limits, None, 2)
+  mrl.reserve([1, 2], wait_and_return(1, (None, None)))
+  await mrl.term(True)
