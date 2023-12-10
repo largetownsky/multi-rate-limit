@@ -5,7 +5,15 @@ import time
 from typing import Any, Coroutine, List, Set
 
 from multi_rate_limit.rate_limit import RateLimit, ResourceOverwriteError
-from multi_rate_limit.multi_rate_limit import MultiRateLimit
+from multi_rate_limit.multi_rate_limit import MultiRateLimit, RateLimitStats
+
+
+def test_rate_limit_stats():
+  limits = [[RateLimit(2, 1), RateLimit(8, 10)], [RateLimit(4, 3)]]
+  stats = RateLimitStats(limits, [[0, 5], [0]], [1, 2], [5, 10])
+  assert stats.past_use_percents() == [[0, 62.5], [0]]
+  assert stats.current_use_percents() == [[50, 75], [50]]
+  assert stats.next_use_percents() == [[300, 137.5], [300]]
 
 
 @pytest.mark.parametrize(
@@ -66,6 +74,8 @@ async def test_multi_rate_limit():
     mrl.reserve([1, 2], None)
   with pytest.raises(ValueError):
     mrl.reserve([1, 2], 0)
+  with pytest.raises(ValueError):
+    mrl.reserve([1, 200], 0)
   assert mrl.cancel(0) is None
   await check_stats(mrl, limits, [[0, 0], [0]], [0, 0], [0, 0], 0, set())
   coro1 = wait_and_return(0.6, (None, 'r1'))
@@ -147,6 +157,19 @@ async def test_multi_rate_limit():
   await check_stats(mrl, limits, [[1, 6], [95]], [0, 0], [0, 0], 0, set())
 
 @pytest.mark.asyncio
+async def test_multi_rate_limit_full():
+  limits = [[RateLimit(10, 1.5), RateLimit(15, 3)], [RateLimit(100, 3)]]
+  mrl = await MultiRateLimit.create(limits, None, 2)
+  t0 = mrl.reserve([1, 1], wait_and_error(0.3, ValueError()))
+  t1 = mrl.reserve([2, 2], wait_and_return(0.3, (None, None)))
+  t2 = mrl.reserve([4, 4], wait_and_error(0.3, ValueError()))
+  await check_stats(mrl, limits, [[0, 0], [0]], [3, 3], [4, 4], 2, {2})
+  t3 = mrl.reserve([10, 0], wait_and_error(0.3, ValueError()))
+  await t1.future
+  await check_stats(mrl, limits, [[3, 3], [3]], [4, 4], [10, 0], 1, {3})
+  await mrl.term(True)
+
+@pytest.mark.asyncio
 async def test_multi_rate_limit_auto_close():
   limits = [[RateLimit(10, 1.5), RateLimit(15, 3)], [RateLimit(100, 3)]]
   mrl = await MultiRateLimit.create(limits, None, 2)
@@ -155,4 +178,16 @@ async def test_multi_rate_limit_auto_close():
   await mrl.term()
   mrl = await MultiRateLimit.create(limits, None, 2)
   mrl.reserve([1, 2], wait_and_return(1, (None, None)))
+  assert mrl.termed() == False
   await mrl.term(True)
+  assert mrl.termed() == True
+  coro = wait_and_error(0.1, ValueError())
+  with pytest.raises(Exception):
+    mrl.reserve([1, 2], coro)
+  await cosume_coroutine_to_avoid_warnings(coro)
+  with pytest.raises(Exception):
+    mrl.cancel(0)
+  with pytest.raises(Exception):
+    await mrl.stats()
+  with pytest.raises(Exception):
+    await mrl.term()

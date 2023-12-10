@@ -170,6 +170,27 @@ async def test_current():
   assert buf.active_run == 0
   assert buf.sum_resources == [0, 0]
 
+@pytest.mark.asyncio
+async def test_current_invalid_resource_overwrite():
+  loop = asyncio.get_running_loop()
+  buf = CurrentResourceBuffer(2, 2)
+  # With return value
+  f = loop.create_future()
+  coro = wait_and_return(0.01, ((0, 0), None))
+  buf.start_coroutine([1, 2], coro, f)
+  await asyncio.wait([buf.task_buffer[0]])
+  assert buf.end_coroutine(100, buf.task_buffer[0]) == (100, [1, 2])
+  with pytest.raises(TypeError):
+    await f
+  # With ResourceOverwriteError
+  f = loop.create_future()
+  coro = wait_and_error(0.01, ResourceOverwriteError(0, [0], Exception()))
+  buf.start_coroutine([1, 2], coro, f)
+  await asyncio.wait([buf.task_buffer[1]])
+  assert buf.end_coroutine(100, buf.task_buffer[1]) == (100, [1, 2])
+  with pytest.raises(ValueError):
+    await f
+
 
 @pytest.mark.asyncio
 async def test_next():

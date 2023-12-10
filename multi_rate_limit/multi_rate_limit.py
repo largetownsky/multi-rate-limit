@@ -187,14 +187,14 @@ class MultiRateLimit:
             time_to_start = await self._time_to_start(sum_resources)
             delay = max(0, time_to_start - current_time)
             if delay <= 0:
-              raise ValueError('Internal logic error')
+              raise Exception('Internal logic error')
             break
         # Wait for current buffer (and past queue to free up space)
         tasks = [t for t in self._current_buffer.task_buffer if t is not None]
         if delay > 0:
           tasks.append(asyncio.create_task(asyncio.sleep(delay), name=''))
         if len(tasks) <= 0:
-          raise ValueError('Internal logic error')
+          raise Exception('Internal logic error')
         dones, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
         current_time = time.time()
         for done in dones:
