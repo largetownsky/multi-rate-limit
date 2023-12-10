@@ -42,7 +42,7 @@ class CurrentResourceBuffer:
         break
       pos = (pos + 1) % len(self.resource_buffer)
       if pos == self.next:
-        raise ValueError(f'Unexpected buffer full with {self.active_run} / {len(self.resource_buffer)}')
+        raise Exception(f'Unexpected buffer full with {self.active_run} / {len(self.resource_buffer)}')
     # Start a coroutine
     task = create_task(coro, name=pos)
     self.resource_buffer[pos] = use_resources
