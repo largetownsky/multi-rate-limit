@@ -12,7 +12,7 @@ import sys
 project = 'multi-rate-limit'
 copyright = '2023, largetownsky'
 author = 'largetownsky'
-release = '0.2.0'
+release = '0.2.1'
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
