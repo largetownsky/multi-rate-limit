@@ -5,7 +5,7 @@ import time
 from typing import Any, Coroutine, List, Set
 
 from multi_rate_limit.rate_limit import RateLimit, ResourceOverwriteError
-from multi_rate_limit.multi_rate_limit import MultiRateLimit, RateLimitStats
+from multi_rate_limit.multi_rate_limit import MultiRateLimit, RateLimitStats, ReservationTicket
 
 
 def test_rate_limit_stats():
@@ -191,3 +191,18 @@ async def test_multi_rate_limit_auto_close():
     await mrl.stats()
   with pytest.raises(Exception):
     await mrl.term()
+
+@pytest.mark.asyncio
+async def test_multi_rate_limit_no_invalid_loop():
+  limits = [[RateLimit(10, 1.5), RateLimit(15, 3)], [RateLimit(100, 3)]]
+  loop_count = 100
+  mrl = await MultiRateLimit.create(limits, None, loop_count)
+  tickets: List[ReservationTicket] = []
+  for i in range(loop_count):
+    tickets.append(mrl.reserve([0, 0], wait_and_return(0, (None, i))))
+    await asyncio.sleep(0)
+  await asyncio.sleep(1)
+  await mrl.term(True)
+  for i, t in enumerate(tickets):
+    assert t.future.done() == True
+    assert await t.future == i

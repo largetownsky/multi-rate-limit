@@ -207,12 +207,12 @@ class MultiRateLimit:
           # By shielding, the await itself is canceled, but the internal add task continues to be executed.
           await asyncio.shield(self._past_queue.add(use_time, use_resources))
       except asyncio.exceptions.CancelledError:
-        break
+        # Do not set the process to None since it has been reset externally
+        return
       except Exception as ex:
-        break
+        self._in_process = None
+        raise ex
     self._in_process = None
-    if ex is not None:
-      raise ex
 
   def _try_process(self) -> None:
     """Trigger internal processing.
